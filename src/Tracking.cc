@@ -888,7 +888,7 @@ void Tracking::CreateInitialMapMonocular()
     float invMedianDepth = 1.0f/medianDepth;
     float d;
     cv::Mat n;
-    float scale = mpInitializer->getScale();
+    float scale = EstimateScale(d, n);
 
 
     if(medianDepth<0 || pKFcur->TrackedMapPoints(1)<100)
