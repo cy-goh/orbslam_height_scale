@@ -111,11 +111,14 @@ bool Initializer::Initialize(const Frame &CurrentFrame, const vector<int> &vMatc
     // Compute ratio of scores
     float RH = SH/(SH+SF);
 
+    cerr << RH << endl;
+
     // Try to reconstruct from homography or fundamental depending on the ratio (0.40-0.45)
     if(RH>0.40)
         return ReconstructH(vbMatchesInliersH,H,mK,R21,t21,vP3D,vbTriangulated,1.0,50);
-    else //if(pF_HF>0.6)
-        return ReconstructF(vbMatchesInliersF,F,mK,R21,t21,vP3D,vbTriangulated,1.0,50);
+    else //if(pF_HF>0.6) // force to use homography (may result in decreased performance)
+        return false;
+//        return ReconstructF(vbMatchesInliersF,F,mK,R21,t21,vP3D,vbTriangulated,1.0,50);
 
     return false;
 }
@@ -569,6 +572,46 @@ bool Initializer::ReconstructF(vector<bool> &vbMatchesInliers, cv::Mat &F21, cv:
     return false;
 }
 
+float Initializer::getScale()
+{
+    return mScale;
+}
+
+float Initializer::InitialSolver(cv::Mat &R, cv::Mat &t, cv::Mat H, float &d0, cv::Mat &n)
+{
+    cv::Mat mKInv = mK.inv();
+    cv::Mat h = (mKInv * H) * mK;
+    cv::Mat AA = (cv::Mat_<float>(9,4) << -h.at<float>(1,1), t.at<float>(1,1), 0, 0,
+            -h.at<float>(1,2), 0, t.at<float>(1,1), 0,
+            -h.at<float>(1,3), 0, 0, t.at<float>(1,1),
+
+            -h.at<float>(2,1), t.at<float>(2,1), 0, 0,
+            -h.at<float>(2,2), 0, t.at<float>(2,1), 0,
+            -h.at<float>(2,3), 0, 0, t.at<float>(2,1),
+
+            -h.at<float>(3,1), t.at<float>(3,1), 0, 0,
+            -h.at<float>(3,2), 0, t.at<float>(3,1), 0,
+            -h.at<float>(3,3), 0, 0, t.at<float>(3,1));
+
+    cv::Mat B = -(cv::Mat_<float>(9,1) << R.at<float>(1,1),
+            R.at<float>(1,2),
+            R.at<float>(1,3),
+            R.at<float>(2,1),
+            R.at<float>(2,2),
+            R.at<float>(2,3),
+            R.at<float>(3,1),
+            R.at<float>(3,2),
+            R.at<float>(3,3));
+    cv::Mat x;
+    cv::solve(AA, B, x, DECOMP_SVD);
+    d0 = 1.0 / cv::norm(x(cv::Range(2,4), cv::Range::all()));
+    n = x(cv::Range(2,4), cv::Range(1,1));
+    n = n / cv::norm(n);
+    cout << "x is " << x << endl;
+    float scaled_height = 1.0 / sqrt(pow(x.at<double>(1), 2.0) + pow(x.at<double>(2), 2.0) + pow(x.at<double>(3), 2.0));
+    return scaled_height;
+}
+
 bool Initializer::ReconstructH(vector<bool> &vbMatchesInliers, cv::Mat &H21, cv::Mat &K,
                       cv::Mat &R21, cv::Mat &t21, vector<cv::Point3f> &vP3D, vector<bool> &vbTriangulated, float minParallax, int minTriangulated)
 {
@@ -596,6 +639,7 @@ bool Initializer::ReconstructH(vector<bool> &vbMatchesInliers, cv::Mat &H21, cv:
 
     if(d1/d2<1.00001 || d2/d3<1.00001)
     {
+        cerr << "d1/d2<1.00001 || d2/d3<1.00001" << endl;
         return false;
     }
 
@@ -701,7 +745,7 @@ bool Initializer::ReconstructH(vector<bool> &vbMatchesInliers, cv::Mat &H21, cv:
         vector<cv::Point3f> vP3Di;
         vector<bool> vbTriangulatedi;
         int nGood = CheckRT(vR[i],vt[i],mvKeys1,mvKeys2,mvMatches12,vbMatchesInliers,K,vP3Di, 4.0*mSigma2, vbTriangulatedi, parallaxi);
-
+        cerr << nGood << " ";
         if(nGood>bestGood)
         {
             secondBestGood = bestGood;
@@ -715,7 +759,7 @@ bool Initializer::ReconstructH(vector<bool> &vbMatchesInliers, cv::Mat &H21, cv:
         {
             secondBestGood = nGood;
         }
-    }
+    }cerr << endl;
 
 
     if(secondBestGood<0.75*bestGood && bestParallax>=minParallax && bestGood>minTriangulated && bestGood>0.9*N)
@@ -724,10 +768,22 @@ bool Initializer::ReconstructH(vector<bool> &vbMatchesInliers, cv::Mat &H21, cv:
         vt[bestSolutionIdx].copyTo(t21);
         vP3D = bestP3D;
         vbTriangulated = bestTriangulated;
-
+        float d;
+        cv::Mat n;
+        float scaled_height = InitialSolver(vR[bestSolutionIdx], vt[bestSolutionIdx], H21, d,n);
+        mScale = 1.7 / scaled_height;
         return true;
     }
-
+    if(secondBestGood >= 0.75 * bestGood) {
+        cerr << "secondBestGood<0.75*bestGood" << endl;
+        cerr << bestGood << " " << secondBestGood << endl;
+    }
+    if(bestParallax < minParallax)
+        cerr << "bestParallax>=minParallax" << endl;
+    if(bestGood <= minTriangulated)
+        cerr << "bestGood>minTriangulated" << endl;
+    if(bestGood <= 0.9 * N)
+        cerr << "bestGood>0.9*N" << endl;
     return false;
 }
 

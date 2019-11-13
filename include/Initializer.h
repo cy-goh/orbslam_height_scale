@@ -42,6 +42,7 @@ public:
     bool Initialize(const Frame &CurrentFrame, const vector<int> &vMatches12,
                     cv::Mat &R21, cv::Mat &t21, vector<cv::Point3f> &vP3D, vector<bool> &vbTriangulated);
 
+    float getScale();
 
 private:
 
@@ -57,6 +58,8 @@ private:
 
     bool ReconstructF(vector<bool> &vbMatchesInliers, cv::Mat &F21, cv::Mat &K,
                       cv::Mat &R21, cv::Mat &t21, vector<cv::Point3f> &vP3D, vector<bool> &vbTriangulated, float minParallax, int minTriangulated);
+
+    float InitialSolver(cv::Mat &R, cv::Mat &t, cv::Mat H, float &d0, cv::Mat &n);
 
     bool ReconstructH(vector<bool> &vbMatchesInliers, cv::Mat &H21, cv::Mat &K,
                       cv::Mat &R21, cv::Mat &t21, vector<cv::Point3f> &vP3D, vector<bool> &vbTriangulated, float minParallax, int minTriangulated);
@@ -94,6 +97,8 @@ private:
     // Ransac sets
     vector<vector<size_t> > mvSets;   
 
+    // Scale
+    float mScale;
 };
 
 } //namespace ORB_SLAM

@@ -234,9 +234,197 @@ cv::Mat Tracking::GrabImageRGBD(const cv::Mat &imRGB,const cv::Mat &imD, const d
     return mCurrentFrame.mTcw.clone();
 }
 
+bool Tracking::solveH(vector<Point2f> srcPoint, vector<Point2f> dstPoint, cv::Mat &H, vector<int> &inlierIndex)
+{
+    cout << "Estimating Homography ..." << endl;
+
+    //this mask dimensions can vary with the dataset and set accordingly.
+    //Mask that lies on the planar road surface
+    double x1 = 500; // left top points x coordinate
+    double y1 = 230; // left top points y coordinate
+    double w1 = 200; // the top base length of the Trapezoid
+    double w2 = 400; // the bottom base length of the Trapezoid
+    double h  = 150; // the height of the Trapezoid
+    // compute the four coners of the Trapezoid
+    double x2 = x1+w1;
+    double y2 = y1;
+    double x3 = x1-0.5*(w2-w1);
+    double y3 = y1+h ;
+    double x4 = x2+0.5*(w2-w1);
+    double y4 = y3;
+
+    double A1 = y3 -y1;
+    double B1 = x1 - x3;
+    double C1 = y1*x3-x1*y3;
+    double A2 = y4 -y2;
+    double B2 = x2 - x4;
+    double C2 = y2*x4-x2*y4;
+
+    for(int i = 0 ; i < (int)srcPoint.size(); ++i)
+    {
+        cv::Point2f queryPoint = srcPoint[i];
+//      ISSUES: We only check if the source point is in ROI or not
+//              upon investigation, it is found that some of the point is match to the cloud etc.
+//              this might affect findHomography extremelyly bad
+//              let's hope that RANSAC is powerful enough
+        if(A1*queryPoint.x+B1*queryPoint.y+C1>0 && A2*queryPoint.x+B2*queryPoint.y+C2<0 && queryPoint.y > y1)
+        {
+            inlierIndex.emplace_back(i);
+        }
+    }
+    //  TODO: VERY BAD BEST PRACTICE VIOLATION, repeated code in multiple functions
+    vector<Point2f> temp;
+    for(int idx:inlierIndex)temp.emplace_back(srcPoint[idx]);
+    srcPoint = temp;
+    temp.clear();
+    for(int idx:inlierIndex)temp.emplace_back(dstPoint[idx]);
+    dstPoint = temp;
+
+//    This commented code shows the keypoint after the last Frame's keypoint is cropped at ROI
+//    cv::Mat imgTmp;
+//    mImGray.copyTo(imgTmp);
+//    for(cv::Point2f p : srcPoint)
+//    {
+//        cv::circle(imgTmp, p, 5, cv::Scalar(255,0,0), -1);
+//    }
+//    cv::Mat lastImgTmp;
+//    mLastImGray.copyTo(lastImgTmp);
+//    for(cv::Point2f p : dstPoint)
+//    {
+//        cv::circle(lastImgTmp, p, 5, cv::Scalar(0,0,255), -1);
+//    }
+////    cv::imshow("From", imgTmp);
+////    cv::imshow("To", lastImgTmp);
+////    cv::waitKey(0);
+////    cv::destroyWindow("From");
+////    cv::destroyWindow("To");
+//    cv::Mat imgConcat;
+//    cv::vconcat(imgTmp, lastImgTmp, imgConcat);
+//    string filename = "/media/sgp1053c/DATA/steven/ORB_SLAM2/imageTmpCombine/" + to_string(mLastFrame.mTimeStamp*10) + " to " + to_string(mCurrentFrame.mTimeStamp*10) + ".png";
+//    bool res = cv::imwrite(filename, imgConcat);
+//    if(res)cout << "image written to " << filename << endl;
+//    else cout << "cannot write!" << endl;
+    cv::Mat mask;
+    inlierIndex.clear();
+    H = findHomography(srcPoint, dstPoint, cv::RANSAC, 1.5, mask);
+    H.convertTo(H, CV_32F);
+    cout << "Homography matrix is:" << H << endl;
+    inlierIndex.clear();
+    for(MatConstIterator_<float> it = mask.begin<float>(); it!= mask.end<float>(); ++it)
+        if(*it>0)
+            inlierIndex.emplace_back(it-mask.begin<float>());
+    if(isfinite(H.at<float>(0,0)))
+    {
+        cout << "Estimated Homography succesfully" << endl;
+        return true;
+    }
+    else
+    {
+        cout << "Something is wrong with HOMOGRAPHY matrix" << endl;
+        return false;
+    }
+}
+
+void Tracking::solveRT(vector<cv::Point2f> srcPoints, vector<cv::Point2f> dstPoints, cv::Mat &R, cv::Mat &t, vector<int> &inlierIndex)
+{
+//    vector<int> mask;
+//    cv::Mat fRANSAC = cv::findFundamentalMat(srcPoints, dstPoints, cv::FM_RANSAC, 0.5, 0.999, mask);
+//    for(int i=0;i<(int)mask.size();i++)if(mask[i]>0)inlierIndex.emplace_back(i);
+//    cv::Mat E = mK.t() * fRANSAC * mK;
+//    cv::sfm::motion
+    cv::Mat mask;
+    cv::Mat E = cv::findEssentialMat(srcPoints, dstPoints, mK, cv::RANSAC, 0.999, 0.5, mask);
+    cv::recoverPose(E, srcPoints, dstPoints, mK, R, t, mask);
+    for(MatConstIterator_<double> it = mask.begin<double>(); it!= mask.end<double>(); ++it)
+        if(*it>0)
+            inlierIndex.emplace_back(it-mask.begin<double>());
+    //refine matches using epipolar constraint
+}
+
+float Tracking::InitialSolver(cv::Mat &R, cv::Mat &t, cv::Mat H, float &d0, cv::Mat &n)
+{
+    cv::Mat mKInv = mK.inv();
+    cv::Mat h = (mKInv * H) * mK;
+    cv::Mat AA = (cv::Mat_<float>(9,4) << -h.at<float>(1,1), t.at<float>(1,1), 0, 0,
+                                          -h.at<float>(1,2), 0, t.at<float>(1,1), 0,
+                                          -h.at<float>(1,3), 0, 0, t.at<float>(1,1),
+
+                                          -h.at<float>(2,1), t.at<float>(2,1), 0, 0,
+                                          -h.at<float>(2,2), 0, t.at<float>(2,1), 0,
+                                          -h.at<float>(2,3), 0, 0, t.at<float>(2,1),
+
+                                          -h.at<float>(3,1), t.at<float>(3,1), 0, 0,
+                                          -h.at<float>(3,2), 0, t.at<float>(3,1), 0,
+                                          -h.at<float>(3,3), 0, 0, t.at<float>(3,1));
+
+    cv::Mat B = -(cv::Mat_<float>(9,1) << R.at<float>(1,1),
+                                          R.at<float>(1,2),
+                                          R.at<float>(1,3),
+                                          R.at<float>(2,1),
+                                          R.at<float>(2,2),
+                                          R.at<float>(2,3),
+                                          R.at<float>(3,1),
+                                          R.at<float>(3,2),
+                                          R.at<float>(3,3));
+    cv::Mat x;
+    cv::solve(AA, B, x, DECOMP_SVD);
+    d0 = 1.0 / cv::norm(x(cv::Range(2,4), cv::Range::all()));
+    n = x(cv::Range(2,4), cv::Range(1,1));
+    n = n / cv::norm(n);
+    cout << "x is " << x << endl;
+    float scaled_height = 1.0 / sqrt(pow(x.at<double>(1), 2.0) + pow(x.at<double>(2), 2.0) + pow(x.at<double>(3), 2.0));
+    return scaled_height;
+}
+
+float Tracking::EstimateScale(float &d, cv::Mat &n)
+{
+//    TODO: make this inside config file instead of hard coded in source code
+//  actual_height taken from http://www.cvlibs.net/datasets/kitti/eval_odometry_detail.php?&result=d568463c0d37f8029259debe61cc3b0f793818f2
+    float actual_height = 1.7;
+    // match
+    cv::BFMatcher matcher(cv::NORM_HAMMING);
+    vector<cv::DMatch> matches;
+    matcher.match(mLastFrame.mDescriptors, mCurrentFrame.mDescriptors, matches);
+    vector<cv::Point2f> srcPoint, dstPoint;
+    for(cv::DMatch pairMatch: matches)
+    {
+        srcPoint.emplace_back(mLastFrame.mvKeys[pairMatch.queryIdx].pt);
+        dstPoint.emplace_back(mCurrentFrame.mvKeys[pairMatch.trainIdx].pt);
+    }
+    cv::Mat R, t, H;
+    vector<int> inlierIndex;
+    // estimate RT
+    solveRT(srcPoint, dstPoint, R, t, inlierIndex);
+    cout << "Number of inlier after solveRT: " << inlierIndex.size() << endl;
+//  TODO: Find more efficient ways than this
+//  TODO: use openmp
+    vector<Point2f> temp;
+    for(int idx:inlierIndex)
+        temp.emplace_back(srcPoint[idx]);
+    srcPoint = temp;
+    for(int idx:inlierIndex)
+        temp.emplace_back(dstPoint[idx]);
+    dstPoint = temp;
+
+    // estimate H
+    inlierIndex.clear();
+    bool retval = solveH(srcPoint, dstPoint, H, inlierIndex);
+    cout << "Number of inlier after solveH: " << inlierIndex.size() << endl;
+
+    // estimate d
+    float scaled_height = InitialSolver(R, t, H, d, n);
+    // find scale
+    float scale = actual_height/scaled_height;
+    cout << "Estimated height: " << scaled_height << endl;
+    cout << "SCALE: " << scale << endl;
+    return scale;
+}
 
 cv::Mat Tracking::GrabImageMonocular(const cv::Mat &im, const double &timestamp)
 {
+    cv::Mat H;
+    vector<int> inlierIndex;
+    mImGray.copyTo(mLastImGray);
     mImGray = im;
 
     if(mImGray.channels()==3)
@@ -256,9 +444,19 @@ cv::Mat Tracking::GrabImageMonocular(const cv::Mat &im, const double &timestamp)
 
     if(mState==NOT_INITIALIZED || mState==NO_IMAGES_YET)
         mCurrentFrame = Frame(mImGray,timestamp,mpIniORBextractor,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth);
-    else
-        mCurrentFrame = Frame(mImGray,timestamp,mpORBextractorLeft,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth);
-
+    else {
+        mCurrentFrame = Frame(mImGray, timestamp, mpORBextractorLeft, mpORBVocabulary, mK, mDistCoef, mbf, mThDepth);
+//        solveH(vector<Point2f>(), vector<Point2f>(), H, inlierIndex);
+    }
+    cout << "Number of key points: " << mCurrentFrame.mvKeys.size() << endl;
+//    cv::Mat imgTmp;
+//    mImGray.copyTo(imgTmp);
+//    cv::drawKeypoints(imgTmp, mCurrentFrame.mvKeys, imgTmp);
+//    string filename = "/media/sgp1053c/DATA/steven/ORB_SLAM2/imageTemp/" + to_string((int)(mCurrentFrame.mTimeStamp*10)) + ".png";
+//    bool res = cv::imwrite(filename, imgTmp);
+//    cout << timestamp << endl;
+//    if(res)cout << "image written to " << filename << endl;
+//    else cout << "cannot write!" << endl;
     Track();
 
     return mCurrentFrame.mTcw.clone();
@@ -688,6 +886,10 @@ void Tracking::CreateInitialMapMonocular()
     // Set median depth to 1
     float medianDepth = pKFini->ComputeSceneMedianDepth(2);
     float invMedianDepth = 1.0f/medianDepth;
+    float d;
+    cv::Mat n;
+    float scale = mpInitializer->getScale();
+
 
     if(medianDepth<0 || pKFcur->TrackedMapPoints(1)<100)
     {
@@ -698,17 +900,18 @@ void Tracking::CreateInitialMapMonocular()
 
     // Scale initial baseline
     cv::Mat Tc2w = pKFcur->GetPose();
-    Tc2w.col(3).rowRange(0,3) = Tc2w.col(3).rowRange(0,3)*invMedianDepth;
+    Tc2w.col(3).rowRange(0,3) = Tc2w.col(3).rowRange(0,3)*scale;
     pKFcur->SetPose(Tc2w);
 
     // Scale points
     vector<MapPoint*> vpAllMapPoints = pKFini->GetMapPointMatches();
+
     for(size_t iMP=0; iMP<vpAllMapPoints.size(); iMP++)
     {
         if(vpAllMapPoints[iMP])
         {
             MapPoint* pMP = vpAllMapPoints[iMP];
-            pMP->SetWorldPos(pMP->GetWorldPos()*invMedianDepth);
+            pMP->SetWorldPos(pMP->GetWorldPos()*scale);
         }
     }
 

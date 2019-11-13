@@ -111,3 +111,8 @@ add_executable(mono_euroc
 Examples/Monocular/mono_euroc.cc)
 target_link_libraries(mono_euroc ${PROJECT_NAME})
 
+add_executable(mono_kitti_test
+        Examples/Monocular/mono_kitti.cc from_sai_folder/vfc.cpp)
+target_link_libraries(mono_kitti_test ${PROJECT_NAME})
+
+

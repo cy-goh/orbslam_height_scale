@@ -25,6 +25,7 @@
 #include<opencv2/core/core.hpp>
 #include<opencv2/features2d/features2d.hpp>
 
+#include "../from_sai_folder/vfc.h"
 #include"Viewer.h"
 #include"FrameDrawer.h"
 #include"Map.h"
@@ -206,6 +207,7 @@ protected:
     Frame mLastFrame;
     unsigned int mnLastKeyFrameId;
     unsigned int mnLastRelocFrameId;
+    cv::Mat mLastImGray;
 
     //Motion Model
     cv::Mat mVelocity;
@@ -214,6 +216,14 @@ protected:
     bool mbRGB;
 
     list<MapPoint*> mlpTemporalPoints;
+
+    bool solveH(vector<Point2f> srcPoint, vector<Point2f> dstPoint, cv::Mat &H, vector<int> &inlierIndex);
+
+    float EstimateScale(float &d, Mat &n);
+
+    void solveRT(vector<cv::Point2f> srcPoints, vector<cv::Point2f> dstPoints, Mat &R, Mat &t, vector<int> &inlierIndex);
+
+    float InitialSolver(Mat &R, Mat &t, Mat H, float &d0, Mat &n);
 };
 
 } //namespace ORB_SLAM
