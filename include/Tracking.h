@@ -219,11 +219,11 @@ protected:
 
     bool solveH(vector<Point2f> srcPoint, vector<Point2f> dstPoint, cv::Mat &H, vector<int> &inlierIndex);
 
-    float EstimateScale(float &d, Mat &n);
+    float EstimateScale(float &d, cv::Mat &n);
 
     void solveRT(vector<cv::Point2f> srcPoints, vector<cv::Point2f> dstPoints, Mat &R, Mat &t, vector<int> &inlierIndex);
 
-    float InitialSolver(Mat &R, Mat &t, Mat H, float &d0, Mat &n);
+    float InitialSolver(cv::Mat &R, cv::Mat &t, cv::Mat H, float &d0, cv::Mat &n);
 };
 
 } //namespace ORB_SLAM

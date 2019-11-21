@@ -23,6 +23,7 @@
 
 #include<opencv2/core/core.hpp>
 #include<opencv2/features2d/features2d.hpp>
+#include<opencv2/sfm.hpp>
 
 #include"ORBmatcher.h"
 #include"FrameDrawer.h"
@@ -327,49 +328,90 @@ bool Tracking::solveH(vector<Point2f> srcPoint, vector<Point2f> dstPoint, cv::Ma
 
 void Tracking::solveRT(vector<cv::Point2f> srcPoints, vector<cv::Point2f> dstPoints, cv::Mat &R, cv::Mat &t, vector<int> &inlierIndex)
 {
-//    vector<int> mask;
 //    cv::Mat fRANSAC = cv::findFundamentalMat(srcPoints, dstPoints, cv::FM_RANSAC, 0.5, 0.999, mask);
-//    for(int i=0;i<(int)mask.size();i++)if(mask[i]>0)inlierIndex.emplace_back(i);
-//    cv::Mat E = mK.t() * fRANSAC * mK;
-//    cv::sfm::motion
+//    fRANSAC.convertTo(fRANSAC, CV_32F);
+//    cv::Mat srcPoints_full_inliers, dstPoints_full_inliers;
+//    srcPoints.copyTo(srcPoints_full_inliers, mask);
+//    dstPoints.copyTo(dstPoints_full_inliers, mask);
+//    cv::Mat E = mK.t() * fRANSAC;
+//    E = E * mK;
+//    cout<<E<<endl;
+//    std::vector<cv::Mat> Rs, ts;
+//    cv::sfm::motionFromEssential(E, Rs, ts);
+//    cv:: Mat homog_src_inliers, homog_dst_inliers;
+//    cv::sfm::euclideanToHomogeneous(srcPoints_full_inliers, homog_src_inliers);
+//    cv::sfm::euclideanToHomogeneous(dstPoints_full_inliers, homog_dst_inliers);
+//    int correctRT = cv::sfm::motionFromEssentialChooseSolution(Rs, ts, mK, homog_src_inliers, mK, homog_dst_inliers);
+//    cv::Mat homog_srcPoints, homog_dstPoints;
+//    cv::sfm::euclideanToHomogeneous(srcPoints, homog_srcPoints);
+//    cv::sfm::euclideanToHomogeneous(dstPoints, homog_dstPoints);
+//    cv::Mat F_dis = cv::Mat::zeros(srcPoints.rows, 1, CV_32F);
+//    for(int i=0;i<srcPoints.rows;i++)
+//    {
+//        cv::Mat abc = fRANSAC * homog_srcPoints.row(i)  ;
+//        float den = cv::sqrt(abc.at<double>(0,0) * abc.at<double>(0,0) + abc.at<double>(0,1) * abc.at<double>(0,1));
+//        cv::Mat dis = homog_dstPoints.row(i) * abc.t();
+//        F_dis.at<double>(i) = cv::sqrt(dis.at<double>(0,0) * dis.at<double>(0,0) /den);
+//    }
+//    mask = F_dis < 0.5;
+//    R = Rs.at(correctRT);
+//    t = ts.at(correctRT);
     cv::Mat mask;
-    cv::Mat E = cv::findEssentialMat(srcPoints, dstPoints, mK, cv::RANSAC, 0.999, 0.5, mask);
+    cv::Mat fRANSAC = cv::findFundamentalMat(srcPoints, dstPoints, cv::FM_RANSAC, 0.5, 0.999, mask);
+    fRANSAC.convertTo(fRANSAC, CV_32F);
+    cv::Mat E = mK.t() * fRANSAC * mK;
+    cout << E << endl;
+    E = cv::findEssentialMat(srcPoints, dstPoints, mK, cv::RANSAC, 0.999, 0.5, mask);
+    cout << E << endl;
     cv::recoverPose(E, srcPoints, dstPoints, mK, R, t, mask);
     for(MatConstIterator_<double> it = mask.begin<double>(); it!= mask.end<double>(); ++it)
         if(*it>0)
             inlierIndex.emplace_back(it-mask.begin<double>());
     //refine matches using epipolar constraint
+//    cv::Mat homog_srcPoints, homog_dstPoints;
+//    cv::convertPointsToHomogeneous(srcPoints, homog_srcPoints);
+//    cv::convertPointsToHomogeneous(dstPoints, homog_dstPoints);
+//    cv::Mat F_dis = cv::Mat::zeros(srcPoints.rows, 1, CV_32F);
+//    for(int i=0;i<srcPoints.rows;i++)
+//    {
+//        cout << fRANSAC.type() << " " << homog_srcPoints.row(i).type() << endl;
+//        cv::Mat abc = fRANSAC *homog_srcPoints.row(i)  ;
+//        float den = cv::sqrt(abc.at<double>(0,0) * abc.at<double>(0,0) + abc.at<double>(0,1) * abc.at<double>(0,1));
+//        cv::Mat dis = homog_dstPoints.row(i) * abc.t();
+//        F_dis.at<double>(i) = cv::sqrt(dis.at<double>(0,0) * dis.at<double>(0,0) /den);
+//    }
+//    mask = F_dis < 0.5;
 }
 
 float Tracking::InitialSolver(cv::Mat &R, cv::Mat &t, cv::Mat H, float &d0, cv::Mat &n)
 {
     cv::Mat mKInv = mK.inv();
     cv::Mat h = (mKInv * H) * mK;
-    cv::Mat AA = (cv::Mat_<float>(9,4) << -h.at<float>(1,1), t.at<float>(1,1), 0, 0,
-                                          -h.at<float>(1,2), 0, t.at<float>(1,1), 0,
-                                          -h.at<float>(1,3), 0, 0, t.at<float>(1,1),
+    cv::Mat AA = (cv::Mat_<float>(9,4) << -h.at<float>(0,0), t.at<float>(0,0), 0, 0,
+                                          -h.at<float>(0,1), 0, t.at<float>(0,0), 0,
+                                          -h.at<float>(0,2), 0, 0, t.at<float>(0,0),
 
-                                          -h.at<float>(2,1), t.at<float>(2,1), 0, 0,
-                                          -h.at<float>(2,2), 0, t.at<float>(2,1), 0,
-                                          -h.at<float>(2,3), 0, 0, t.at<float>(2,1),
+                                          -h.at<float>(1,0), t.at<float>(1,0), 0, 0,
+                                          -h.at<float>(1,1), 0, t.at<float>(1,0), 0,
+                                          -h.at<float>(1,2), 0, 0, t.at<float>(1,0),
 
-                                          -h.at<float>(3,1), t.at<float>(3,1), 0, 0,
-                                          -h.at<float>(3,2), 0, t.at<float>(3,1), 0,
-                                          -h.at<float>(3,3), 0, 0, t.at<float>(3,1));
+                                          -h.at<float>(2,0), t.at<float>(2,0), 0, 0,
+                                          -h.at<float>(2,1), 0, t.at<float>(2,0), 0,
+                                          -h.at<float>(2,2), 0, 0, t.at<float>(2,0));
 
-    cv::Mat B = -(cv::Mat_<float>(9,1) << R.at<float>(1,1),
+    cv::Mat B = -(cv::Mat_<float>(9,1) << R.at<float>(0,0),
+                                          R.at<float>(0,1),
+                                          R.at<float>(0,2),
+                                          R.at<float>(1,0),
+                                          R.at<float>(1,1),
                                           R.at<float>(1,2),
-                                          R.at<float>(1,3),
+                                          R.at<float>(2,0),
                                           R.at<float>(2,1),
-                                          R.at<float>(2,2),
-                                          R.at<float>(2,3),
-                                          R.at<float>(3,1),
-                                          R.at<float>(3,2),
-                                          R.at<float>(3,3));
+                                          R.at<float>(2,2));
     cv::Mat x;
     cv::solve(AA, B, x, DECOMP_SVD);
-    d0 = 1.0 / cv::norm(x(cv::Range(2,4), cv::Range::all()));
-    n = x(cv::Range(2,4), cv::Range(1,1));
+    d0 = 1.0 / cv::norm(x(cv::Range(1,3), cv::Range::all()));
+    n = x(cv::Range(1,3), cv::Range(0,0));
     n = n / cv::norm(n);
     cout << "x is " << x << endl;
     float scaled_height = 1.0 / sqrt(pow(x.at<double>(1), 2.0) + pow(x.at<double>(2), 2.0) + pow(x.at<double>(3), 2.0));
@@ -884,14 +926,14 @@ void Tracking::CreateInitialMapMonocular()
     Optimizer::GlobalBundleAdjustemnt(mpMap,20);
 
     // Set median depth to 1
-    float medianDepth = pKFini->ComputeSceneMedianDepth(2);
-    float invMedianDepth = 1.0f/medianDepth;
+//    float medianDepth = pKFini->ComputeSceneMedianDepth(2);
+//    float invMedianDepth = 1.0f/medianDepth;
     float d;
     cv::Mat n;
     float scale = EstimateScale(d, n);
 
 
-    if(medianDepth<0 || pKFcur->TrackedMapPoints(1)<100)
+    if(scale<0 || pKFcur->TrackedMapPoints(1)<100)
     {
         cout << "Wrong initialization, reseting..." << endl;
         Reset();
