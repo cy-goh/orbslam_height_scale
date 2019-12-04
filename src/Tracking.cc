@@ -24,6 +24,7 @@
 #include<opencv2/core/core.hpp>
 #include<opencv2/features2d/features2d.hpp>
 #include<opencv2/sfm.hpp>
+#include<opencv2/imgproc.hpp>
 
 #include"ORBmatcher.h"
 #include"FrameDrawer.h"
@@ -239,27 +240,7 @@ bool Tracking::solveH(vector<Point2f> srcPoint, vector<Point2f> dstPoint, cv::Ma
 {
     cout << "Estimating Homography ..." << endl;
 
-    //this mask dimensions can vary with the dataset and set accordingly.
-    //Mask that lies on the planar road surface
-    double x1 = 500; // left top points x coordinate
-    double y1 = 230; // left top points y coordinate
-    double w1 = 200; // the top base length of the Trapezoid
-    double w2 = 400; // the bottom base length of the Trapezoid
-    double h  = 150; // the height of the Trapezoid
-    // compute the four coners of the Trapezoid
-    double x2 = x1+w1;
-    double y2 = y1;
-    double x3 = x1-0.5*(w2-w1);
-    double y3 = y1+h ;
-    double x4 = x2+0.5*(w2-w1);
-    double y4 = y3;
-
-    double A1 = y3 -y1;
-    double B1 = x1 - x3;
-    double C1 = y1*x3-x1*y3;
-    double A2 = y4 -y2;
-    double B2 = x2 - x4;
-    double C2 = y2*x4-x2*y4;
+    vector<Point2f> ROI = {Point2f(500,230), Point2f(700, 230), Point2f(800, 380), Point2f(400, 380)};
 
     for(int i = 0 ; i < (int)srcPoint.size(); ++i)
     {
@@ -268,7 +249,8 @@ bool Tracking::solveH(vector<Point2f> srcPoint, vector<Point2f> dstPoint, cv::Ma
 //              upon investigation, it is found that some of the point is match to the cloud etc.
 //              this might affect findHomography extremelyly bad
 //              let's hope that RANSAC is powerful enough
-        if(A1*queryPoint.x+B1*queryPoint.y+C1>0 && A2*queryPoint.x+B2*queryPoint.y+C2<0 && queryPoint.y > y1)
+//        if(A1*queryPoint.x+B1*queryPoint.y+C1>0 && A2*queryPoint.x+B2*queryPoint.y+C2<0 && queryPoint.y > y1)
+        if(cv::pointPolygonTest(ROI, queryPoint, false) >= 0)
         {
             inlierIndex.emplace_back(i);
         }
@@ -282,32 +264,33 @@ bool Tracking::solveH(vector<Point2f> srcPoint, vector<Point2f> dstPoint, cv::Ma
     dstPoint = temp;
 
 //    This commented code shows the keypoint after the last Frame's keypoint is cropped at ROI
-//    cv::Mat imgTmp;
-//    mImGray.copyTo(imgTmp);
-//    for(cv::Point2f p : srcPoint)
-//    {
-//        cv::circle(imgTmp, p, 5, cv::Scalar(255,0,0), -1);
-//    }
-//    cv::Mat lastImgTmp;
-//    mLastImGray.copyTo(lastImgTmp);
-//    for(cv::Point2f p : dstPoint)
-//    {
-//        cv::circle(lastImgTmp, p, 5, cv::Scalar(0,0,255), -1);
-//    }
-////    cv::imshow("From", imgTmp);
-////    cv::imshow("To", lastImgTmp);
-////    cv::waitKey(0);
-////    cv::destroyWindow("From");
-////    cv::destroyWindow("To");
-//    cv::Mat imgConcat;
-//    cv::vconcat(imgTmp, lastImgTmp, imgConcat);
-//    string filename = "/media/sgp1053c/DATA/steven/ORB_SLAM2/imageTmpCombine/" + to_string(mLastFrame.mTimeStamp*10) + " to " + to_string(mCurrentFrame.mTimeStamp*10) + ".png";
-//    bool res = cv::imwrite(filename, imgConcat);
-//    if(res)cout << "image written to " << filename << endl;
-//    else cout << "cannot write!" << endl;
+    cv::Mat imgTmp;
+    mImGray.copyTo(imgTmp);
+    for(cv::Point2f p : srcPoint)
+    {
+        cv::circle(imgTmp, p, 5, cv::Scalar(255,0,0), -1);
+    }
+    cv::Mat lastImgTmp;
+    mLastImGray.copyTo(lastImgTmp);
+    for(cv::Point2f p : dstPoint)
+    {
+        cv::circle(lastImgTmp, p, 5, cv::Scalar(0,0,255), -1);
+    }
+//    cv::imshow("From", imgTmp);
+//    cv::imshow("To", lastImgTmp);
+//    cv::waitKey(0);
+//    cv::destroyWindow("From");
+//    cv::destroyWindow("To");
+    cv::Mat imgConcat;
+    cv::vconcat(imgTmp, lastImgTmp, imgConcat);
+    string filename = "/media/sgp1053c/DATA/steven/ORB_SLAM2/imageTmpCombine/" + to_string(mLastFrame.mTimeStamp*10) + " to " + to_string(mCurrentFrame.mTimeStamp*10) + ".png";
+    bool res = cv::imwrite(filename, imgConcat);
+    if(res)cout << "image written to " << filename << endl;
+    else cout << "cannot write!" << endl;
     cv::Mat mask;
     inlierIndex.clear();
     H = findHomography(srcPoint, dstPoint, cv::RANSAC, 1.5, mask);
+    cout << "Homography matrix is:" << H << endl;
     H.convertTo(H, CV_32F);
     cout << "Homography matrix is:" << H << endl;
     inlierIndex.clear();
@@ -456,8 +439,8 @@ float Tracking::InitialSolver(cv::Mat &R, cv::Mat &t, cv::Mat H, float &scaled_h
     //second way of solving Ax=B
     X = A_Eigen.jacobiSvd(Eigen::ComputeFullU | Eigen::ComputeFullV).solve(B_Eigen);
     scaled_height = 1.0 / sqrt( pow(X(1), 2.0 ) + pow(X(2), 2.0 ) + pow(X(3), 2.0 ) );
-//    return scaled_height;
-    //cout << "Estimated Height = " << scaled_height << endl;
+    return scaled_height;
+    cout << "Estimated Height = " << scaled_height << endl;
 //    ==================================================================================================================
 
 //    cv::Mat mKInv = mK.inv();
@@ -499,20 +482,28 @@ float Tracking::EstimateScale(float &d, cv::Mat &n)
 //    TODO: make this inside config file instead of hard coded in source code
 //  actual_height taken from http://www.cvlibs.net/datasets/kitti/eval_odometry_detail.php?&result=d568463c0d37f8029259debe61cc3b0f793818f2
     float actual_height = 1.7;
-
+    cv::Mat tmpCur, tmpPrev;
+    cv::undistort(mCurrentFrame.im, tmpCur, mK, mDistCoef);
+    cv::undistort(mLastFrame.im, tmpPrev, mK, mDistCoef);
+//    TODO: in order to try this effortlessly, I put the image in the Frame
+//      no check has been done to the memory used after this addition
+//      if the memory requrirement is suddenly very big, that is one of the cause
+    vector<cv::KeyPoint> kpCur, kpPrev;
+    cv::Mat descCur, descPrev;
     cv::Ptr<cv::AKAZE> fdetector = cv::AKAZE::create();
     fdetector->setThreshold(0.1e-4);
-    fdetector->detectAndCompute(mCurrentFrame)
+    fdetector->detectAndCompute(tmpCur, cv::Mat(), kpCur, descCur);
+    fdetector->detectAndCompute(tmpPrev, cv::Mat(), kpPrev, descPrev);
 
     // match
     cv::BFMatcher matcher(cv::NORM_HAMMING);
     vector<cv::DMatch> matches;
-    matcher.match(mLastFrame.mDescriptors, mCurrentFrame.mDescriptors, matches);
+    matcher.match(descPrev, descCur, matches);
     vector<cv::Point2f> srcPoint, dstPoint;
     for(cv::DMatch pairMatch: matches)
     {
-        srcPoint.emplace_back(mLastFrame.mvKeys[pairMatch.queryIdx].pt);
-        dstPoint.emplace_back(mCurrentFrame.mvKeys[pairMatch.trainIdx].pt);
+        srcPoint.emplace_back(kpPrev[pairMatch.queryIdx].pt);
+        dstPoint.emplace_back(kpCur[pairMatch.trainIdx].pt);
     }
     cv::Mat R, t, H;
     vector<int> inlierIndex;
@@ -753,7 +744,9 @@ void Tracking::Track()
             }
             else
                 mVelocity = cv::Mat();
-
+            cout << "Velocity" << endl;
+            cout << mVelocity << endl;
+            cout << norm(mVelocity(Range(0,3), Range(3,4))) << endl;
             mpMapDrawer->SetCurrentCameraPose(mCurrentFrame.mTcw);
 
             // Clean VO matches
