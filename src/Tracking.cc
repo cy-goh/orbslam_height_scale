@@ -383,39 +383,115 @@ void Tracking::solveRT(vector<cv::Point2f> srcPoints, vector<cv::Point2f> dstPoi
 //    mask = F_dis < 0.5;
 }
 
-float Tracking::InitialSolver(cv::Mat &R, cv::Mat &t, cv::Mat H, float &d0, cv::Mat &n)
+float Tracking::InitialSolver(cv::Mat &R, cv::Mat &t, cv::Mat H, float &scaled_height, cv::Mat &n)
 {
-    cv::Mat mKInv = mK.inv();
-    cv::Mat h = (mKInv * H) * mK;
-    cv::Mat AA = (cv::Mat_<float>(9,4) << -h.at<float>(0,0), t.at<float>(0,0), 0, 0,
-                                          -h.at<float>(0,1), 0, t.at<float>(0,0), 0,
-                                          -h.at<float>(0,2), 0, 0, t.at<float>(0,0),
+    Eigen::MatrixXf A_Eigen = Eigen::MatrixXf::Zero(9, 4);
+    Eigen::MatrixXf B_Eigen = Eigen::MatrixXf::Zero(9, 1);
 
-                                          -h.at<float>(1,0), t.at<float>(1,0), 0, 0,
-                                          -h.at<float>(1,1), 0, t.at<float>(1,0), 0,
-                                          -h.at<float>(1,2), 0, 0, t.at<float>(1,0),
+    cv::Mat h = cv::Mat::zeros(3, 3, CV_32FC1);
+//    H.convertTo(H, CV_32FC1);
+//    K.convertTo(K, CV_32FC1);
+//    t.convertTo(t, CV_32FC1);
+//    R.convertTo(R, CV_32FC1);
 
-                                          -h.at<float>(2,0), t.at<float>(2,0), 0, 0,
-                                          -h.at<float>(2,1), 0, t.at<float>(2,0), 0,
-                                          -h.at<float>(2,2), 0, 0, t.at<float>(2,0));
+    h = mK.inv() * H * mK;//implemented just the homography decomposition part from their paper into this section - this is based on method proposed in 2008 paper to estimate scale
+    //the 2014 paper author suggested to perform one more optimization and add kalman filtering to improve scale estimation accuracy, but that is not yet implemented here
 
-    cv::Mat B = -(cv::Mat_<float>(9,1) << R.at<float>(0,0),
-                                          R.at<float>(0,1),
-                                          R.at<float>(0,2),
-                                          R.at<float>(1,0),
-                                          R.at<float>(1,1),
-                                          R.at<float>(1,2),
-                                          R.at<float>(2,0),
-                                          R.at<float>(2,1),
-                                          R.at<float>(2,2));
-    cv::Mat x;
-    cv::solve(AA, B, x, DECOMP_SVD);
-    d0 = 1.0 / cv::norm(x(cv::Range(1,3), cv::Range::all()));
-    n = x(cv::Range(1,3), cv::Range(0,0));
-    n = n / cv::norm(n);
-    cout << "x is " << x << endl;
-    float scaled_height = 1.0 / sqrt(pow(x.at<double>(1), 2.0) + pow(x.at<double>(2), 2.0) + pow(x.at<double>(3), 2.0));
-    return scaled_height;
+    A_Eigen(0, 0) = -h.at<float>(0, 0);
+    A_Eigen(0, 1) = t.at<float>(0, 0);
+    A_Eigen(0, 2) = 0.0;
+    A_Eigen(0, 3) = 0;
+    A_Eigen(1, 0) = -h.at<float>(0, 1);
+    A_Eigen(1, 1) = 0.0;
+    A_Eigen(1, 2) = t.at<float>(0, 0);
+    A_Eigen(1, 3) = 0;
+    A_Eigen(2, 0) = -h.at<float>(0, 2);
+    A_Eigen(2, 1) = 0.0;
+    A_Eigen(2, 2) = 0.0;
+    A_Eigen(2, 3) = t.at<float>(0, 0);
+
+    A_Eigen(3, 0) = -h.at<float>(1, 0);
+    A_Eigen(3, 1) = t.at<float>(1, 0);
+    A_Eigen(3, 2) = 0.0;
+    A_Eigen(3, 3) = 0;
+    A_Eigen(4, 0) = -h.at<float>(1, 1);
+    A_Eigen(4, 1) = 0;
+    A_Eigen(4, 2) = t.at<float>(1, 0);
+    A_Eigen(4, 3) = 0;
+    A_Eigen(5, 0) = -h.at<float>(1, 2);
+    A_Eigen(5, 1) = 0;
+    A_Eigen(5, 2) = 0.0;
+    A_Eigen(5, 3) = t.at<float>(1, 0);
+
+    A_Eigen(6, 0) = -h.at<float>(2, 0);
+    A_Eigen(6, 1) = t.at<float>(2, 0);
+    A_Eigen(6, 2) = 0.0;
+    A_Eigen(6, 3) = 0;
+    A_Eigen(7, 0) = -h.at<float>(2, 1);
+    A_Eigen(7, 1) = 0;
+    A_Eigen(7, 2) = t.at<float>(2, 0);
+    A_Eigen(7, 3) = 0;
+    A_Eigen(8, 0) = -h.at<float>(2, 2);
+    A_Eigen(8, 1) = 0;
+    A_Eigen(8, 2) = 0.0;
+    A_Eigen(8, 3) = t.at<float>(2, 0);
+
+    B_Eigen(0, 0) = R.at<float>(0, 0);
+    B_Eigen(1, 0) = R.at<float>(0, 1);
+    B_Eigen(2, 0) = R.at<float>(0, 2);
+    B_Eigen(3, 0) = R.at<float>(1, 0);
+    B_Eigen(4, 0) = R.at<float>(1, 1);
+    B_Eigen(5, 0) = R.at<float>(1, 2);
+    B_Eigen(6, 0) = R.at<float>(2, 0);
+    B_Eigen(7, 0) = R.at<float>(2, 1);
+    B_Eigen(8, 0) = R.at<float>(2, 2);
+    B_Eigen = -B_Eigen;
+
+    //first way of solving Ax=B -> as good as possible
+    Eigen::Vector4f X;
+//    X = A_Eigen.fullPivHouseholderQr().solve(B_Eigen);
+//    scaled_height = 1.0 / sqrt(pow(X(1), 2.0) + pow(X(2), 2.0) + pow(X(3), 2.0));
+    //cout << "Estimated Height = " << scaled_height << endl;
+
+    //second way of solving Ax=B
+    X = A_Eigen.jacobiSvd(Eigen::ComputeFullU | Eigen::ComputeFullV).solve(B_Eigen);
+    scaled_height = 1.0 / sqrt( pow(X(1), 2.0 ) + pow(X(2), 2.0 ) + pow(X(3), 2.0 ) );
+//    return scaled_height;
+    //cout << "Estimated Height = " << scaled_height << endl;
+//    ==================================================================================================================
+
+//    cv::Mat mKInv = mK.inv();
+//    cv::Mat h = (mKInv * H) * mK;
+//    cv::Mat AA = (cv::Mat_<float>(9,4) << -h.at<float>(0,0), t.at<float>(0,0), 0, 0,
+//                                          -h.at<float>(0,1), 0, t.at<float>(0,0), 0,
+//                                          -h.at<float>(0,2), 0, 0, t.at<float>(0,0),
+//
+//                                          -h.at<float>(1,0), t.at<float>(1,0), 0, 0,
+//                                          -h.at<float>(1,1), 0, t.at<float>(1,0), 0,
+//                                          -h.at<float>(1,2), 0, 0, t.at<float>(1,0),
+//
+//                                          -h.at<float>(2,0), t.at<float>(2,0), 0, 0,
+//                                          -h.at<float>(2,1), 0, t.at<float>(2,0), 0,
+//                                          -h.at<float>(2,2), 0, 0, t.at<float>(2,0));
+//
+//    cv::Mat B = -(cv::Mat_<float>(9,1) << R.at<float>(0,0),
+//                                          R.at<float>(0,1),
+//                                          R.at<float>(0,2),
+//                                          R.at<float>(1,0),
+//                                          R.at<float>(1,1),
+//                                          R.at<float>(1,2),
+//                                          R.at<float>(2,0),
+//                                          R.at<float>(2,1),
+//                                          R.at<float>(2,2));
+//    cv::Mat x;
+//    cv::solve(AA, B, x, DECOMP_SVD);
+//    d0 = 1.0 / cv::norm(x(cv::Range(1,4), cv::Range::all()));
+//    n = x(cv::Range(1,3), cv::Range(0,0));
+//    n = n / cv::norm(n);
+//    cout << "x is " << x << endl;
+//    float scaled_height = 1.0 / sqrt(pow(x.at<float>(1), 2.0) + pow(x.at<float>(2), 2.0) + pow(x.at<float>(3), 2.0));
+//    cout << d0 <<" "<< scaled_height << endl;
+//    return scaled_height;
 }
 
 float Tracking::EstimateScale(float &d, cv::Mat &n)
@@ -423,6 +499,11 @@ float Tracking::EstimateScale(float &d, cv::Mat &n)
 //    TODO: make this inside config file instead of hard coded in source code
 //  actual_height taken from http://www.cvlibs.net/datasets/kitti/eval_odometry_detail.php?&result=d568463c0d37f8029259debe61cc3b0f793818f2
     float actual_height = 1.7;
+
+    cv::Ptr<cv::AKAZE> fdetector = cv::AKAZE::create();
+    fdetector->setThreshold(0.1e-4);
+    fdetector->detectAndCompute(mCurrentFrame)
+
     // match
     cv::BFMatcher matcher(cv::NORM_HAMMING);
     vector<cv::DMatch> matches;
@@ -437,6 +518,8 @@ float Tracking::EstimateScale(float &d, cv::Mat &n)
     vector<int> inlierIndex;
     // estimate RT
     solveRT(srcPoint, dstPoint, R, t, inlierIndex);
+    cout << "R: " << R << endl;
+    cout << "t: " << t << endl;
     cout << "Number of inlier after solveRT: " << inlierIndex.size() << endl;
 //  TODO: Find more efficient ways than this
 //  TODO: use openmp
@@ -490,7 +573,7 @@ cv::Mat Tracking::GrabImageMonocular(const cv::Mat &im, const double &timestamp)
         mCurrentFrame = Frame(mImGray, timestamp, mpORBextractorLeft, mpORBVocabulary, mK, mDistCoef, mbf, mThDepth);
 //        solveH(vector<Point2f>(), vector<Point2f>(), H, inlierIndex);
     }
-    cout << "Number of key points: " << mCurrentFrame.mvKeys.size() << endl;
+//    cout << "Number of key points: " << mCurrentFrame.mvKeys.size() << endl;
 //    cv::Mat imgTmp;
 //    mImGray.copyTo(imgTmp);
 //    cv::drawKeypoints(imgTmp, mCurrentFrame.mvKeys, imgTmp);
