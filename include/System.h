@@ -122,6 +122,10 @@ public:
     std::vector<MapPoint*> GetTrackedMapPoints();
     std::vector<cv::KeyPoint> GetTrackedKeyPointsUn();
 
+//    Temporary getter of the pointer to Tracking Class
+//    Used to collect the scale which is located in mpTracker.ScaleHistory
+    Tracking* GetTracking(){ return mpTracker;}
+
 private:
 
     // Input sensor

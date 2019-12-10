@@ -116,6 +116,9 @@ public:
 
     void Reset();
 
+
+    vector<float> scaleHistory;
+
 protected:
 
     // Main tracking function. It is independent of the input sensor.
@@ -217,13 +220,19 @@ protected:
 
     list<MapPoint*> mlpTemporalPoints;
 
-    bool solveH(vector<Point2f> srcPoint, vector<Point2f> dstPoint, cv::Mat &H, vector<int> &inlierIndex);
+    double mTimeStampLastUpdate;
+    bool bNeedRescale;
+    cv::Mat prevNormal;
+    float oldScale;
+    const double NORMAL_ANGLE_THRESHOLD = 5.0 * M_PI / 180;
+    const double SCALE_UPDATE_PERIOD = 3.0; // should be in seconds
 
+    void filterSrcAndDstPointsBasedOnMask(vector<cv::Point2f> &srcPoints, vector<cv::Point2f> &dstPoints, cv::Mat mask);
+    bool solveH(vector<Point2f> &srcPoint, vector<Point2f> &dstPoint, cv::Mat &H, Mat &mask);
+    void solveRT(vector<cv::Point2f> &srcPoints, vector<cv::Point2f> &dstPoints, Mat &R, Mat &t, Mat &mask);
+    void InitialSolver(cv::Mat R, cv::Mat t, cv::Mat H, float &d0, cv::Mat &n);
     float EstimateScale(float &d, cv::Mat &n);
-
-    void solveRT(vector<cv::Point2f> srcPoints, vector<cv::Point2f> dstPoints, Mat &R, Mat &t, vector<int> &inlierIndex);
-
-    float InitialSolver(cv::Mat &R, cv::Mat &t, cv::Mat H, float &d0, cv::Mat &n);
+    void Rescale();
 };
 
 } //namespace ORB_SLAM

@@ -23,7 +23,6 @@
 
 #include<opencv2/core/core.hpp>
 #include<opencv2/features2d/features2d.hpp>
-#include<opencv2/sfm.hpp>
 #include<opencv2/imgproc.hpp>
 
 #include"ORBmatcher.h"
@@ -236,67 +235,48 @@ cv::Mat Tracking::GrabImageRGBD(const cv::Mat &imRGB,const cv::Mat &imD, const d
     return mCurrentFrame.mTcw.clone();
 }
 
-bool Tracking::solveH(vector<Point2f> srcPoint, vector<Point2f> dstPoint, cv::Mat &H, vector<int> &inlierIndex)
-{
-    cout << "Estimating Homography ..." << endl;
 
+bool Tracking::solveH(vector<Point2f> &srcPoint, vector<Point2f> &dstPoint, cv::Mat &H, Mat &mask)
+{
+//  This ROI defines the ground plane in front of the vehicle. The paper suggests that a basic road detector is used
+//  to pre-determine the ROI needed, but for now, we just use the ROI defined in the author's code.
     vector<Point2f> ROI = {Point2f(500,230), Point2f(700, 230), Point2f(800, 380), Point2f(400, 380)};
 
-    for(int i = 0 ; i < (int)srcPoint.size(); ++i)
-    {
-        cv::Point2f queryPoint = srcPoint[i];
+    vector<Point2f> srcPointROI, dstPointROI;
+
+    for(int i = 0 ; i < (int)srcPoint.size(); ++i) {
 //      ISSUES: We only check if the source point is in ROI or not
 //              upon investigation, it is found that some of the point is match to the cloud etc.
-//              this might affect findHomography extremelyly bad
-//              let's hope that RANSAC is powerful enough
-//        if(A1*queryPoint.x+B1*queryPoint.y+C1>0 && A2*queryPoint.x+B2*queryPoint.y+C2<0 && queryPoint.y > y1)
-        if(cv::pointPolygonTest(ROI, queryPoint, false) >= 0)
-        {
-            inlierIndex.emplace_back(i);
+//              this might or might not affect findHomography badly
+        // If srcPoint[i] is in / on the polygon defined in ROI, push both src and dst Point.
+        if (cv::pointPolygonTest(ROI, srcPoint[i], false) >= 0) {
+            srcPointROI.push_back(srcPoint[i]);
+            dstPointROI.push_back(dstPoint[i]);
         }
     }
-    //  TODO: VERY BAD BEST PRACTICE VIOLATION, repeated code in multiple functions
-    vector<Point2f> temp;
-    for(int idx:inlierIndex)temp.emplace_back(srcPoint[idx]);
-    srcPoint = temp;
-    temp.clear();
-    for(int idx:inlierIndex)temp.emplace_back(dstPoint[idx]);
-    dstPoint = temp;
 
 //    This commented code shows the keypoint after the last Frame's keypoint is cropped at ROI
-    cv::Mat imgTmp;
-    mImGray.copyTo(imgTmp);
-    for(cv::Point2f p : srcPoint)
-    {
-        cv::circle(imgTmp, p, 5, cv::Scalar(255,0,0), -1);
-    }
-    cv::Mat lastImgTmp;
-    mLastImGray.copyTo(lastImgTmp);
-    for(cv::Point2f p : dstPoint)
-    {
-        cv::circle(lastImgTmp, p, 5, cv::Scalar(0,0,255), -1);
-    }
-//    cv::imshow("From", imgTmp);
-//    cv::imshow("To", lastImgTmp);
-//    cv::waitKey(0);
-//    cv::destroyWindow("From");
-//    cv::destroyWindow("To");
-    cv::Mat imgConcat;
-    cv::vconcat(imgTmp, lastImgTmp, imgConcat);
-    string filename = "/media/sgp1053c/DATA/steven/ORB_SLAM2/imageTmpCombine/" + to_string(mLastFrame.mTimeStamp*10) + " to " + to_string(mCurrentFrame.mTimeStamp*10) + ".png";
-    bool res = cv::imwrite(filename, imgConcat);
-    if(res)cout << "image written to " << filename << endl;
-    else cout << "cannot write!" << endl;
-    cv::Mat mask;
-    inlierIndex.clear();
-    H = findHomography(srcPoint, dstPoint, cv::RANSAC, 1.5, mask);
-    cout << "Homography matrix is:" << H << endl;
+//    The result will be saved as a file indicated in filename
+
+//    cv::Mat imgTmp;
+//    mImGray.copyTo(imgTmp);
+//    for(cv::Point2f p : srcPoint)cv::circle(lastImgTmp, p, 5, cv::Scalar(255,0,0), -1);
+//    cv::Mat lastImgTmp;
+//    mLastImGray.copyTo(lastImgTmp);
+//    for(cv::Point2f p : dstPoint)cv::circle(imgTmp, p, 5, cv::Scalar(0,0,255), -1);
+//    cv::Mat imgConcat;
+//    cv::vconcat(imgTmp, lastImgTmp, imgConcat);
+//    string filename = "/media/sgp1053c/DATA/steven/ORB_SLAM2/imageTmpCombine/" + to_string(mLastFrame.mTimeStamp*10) + " to " + to_string(mCurrentFrame.mTimeStamp*10) + ".png";
+//    bool res = cv::imwrite(filename, imgConcat);
+//    if(res)cout << "image written to " << filename << endl;
+//    else cout << "cannot write!" << endl;
+
+//  Now we find the Homography matrix between the two ground planes.
+    H = findHomography(srcPointROI, dstPointROI, cv::RANSAC, 1.5, mask);
     H.convertTo(H, CV_32F);
-    cout << "Homography matrix is:" << H << endl;
-    inlierIndex.clear();
-    for(MatConstIterator_<float> it = mask.begin<float>(); it!= mask.end<float>(); ++it)
-        if(*it>0)
-            inlierIndex.emplace_back(it-mask.begin<float>());
+
+//  TODO: refine homography matrix
+
     if(isfinite(H.at<float>(0,0)))
     {
         cout << "Estimated Homography succesfully" << endl;
@@ -309,48 +289,33 @@ bool Tracking::solveH(vector<Point2f> srcPoint, vector<Point2f> dstPoint, cv::Ma
     }
 }
 
-void Tracking::solveRT(vector<cv::Point2f> srcPoints, vector<cv::Point2f> dstPoints, cv::Mat &R, cv::Mat &t, vector<int> &inlierIndex)
+void Tracking::filterSrcAndDstPointsBasedOnMask(vector<cv::Point2f> &srcPoints, vector<cv::Point2f> &dstPoints, cv::Mat mask)
 {
+    int idx = 0; // idx will be the first index in which the mask = 0, also corresponds to the number of points with mask = 1
+    for(MatConstIterator_<double> it = mask.begin<double>(); it!= mask.end<double>(); ++it)
+    {
+        if(*it>0)
+        {
+            srcPoints[idx] = srcPoints[it-mask.begin<double>()];
+            dstPoints[idx++] = dstPoints[it-mask.begin<double>()];
+        }
+    }
+    srcPoints.resize(idx);
+    dstPoints.resize(idx);
+}
+
+void Tracking::solveRT(vector<cv::Point2f> &srcPoints, vector<cv::Point2f> &dstPoints, cv::Mat &R, cv::Mat &t, Mat &mask)
+{
+    cv::Mat E;
 //    cv::Mat fRANSAC = cv::findFundamentalMat(srcPoints, dstPoints, cv::FM_RANSAC, 0.5, 0.999, mask);
 //    fRANSAC.convertTo(fRANSAC, CV_32F);
-//    cv::Mat srcPoints_full_inliers, dstPoints_full_inliers;
-//    srcPoints.copyTo(srcPoints_full_inliers, mask);
-//    dstPoints.copyTo(dstPoints_full_inliers, mask);
-//    cv::Mat E = mK.t() * fRANSAC;
-//    E = E * mK;
-//    cout<<E<<endl;
-//    std::vector<cv::Mat> Rs, ts;
-//    cv::sfm::motionFromEssential(E, Rs, ts);
-//    cv:: Mat homog_src_inliers, homog_dst_inliers;
-//    cv::sfm::euclideanToHomogeneous(srcPoints_full_inliers, homog_src_inliers);
-//    cv::sfm::euclideanToHomogeneous(dstPoints_full_inliers, homog_dst_inliers);
-//    int correctRT = cv::sfm::motionFromEssentialChooseSolution(Rs, ts, mK, homog_src_inliers, mK, homog_dst_inliers);
-//    cv::Mat homog_srcPoints, homog_dstPoints;
-//    cv::sfm::euclideanToHomogeneous(srcPoints, homog_srcPoints);
-//    cv::sfm::euclideanToHomogeneous(dstPoints, homog_dstPoints);
-//    cv::Mat F_dis = cv::Mat::zeros(srcPoints.rows, 1, CV_32F);
-//    for(int i=0;i<srcPoints.rows;i++)
-//    {
-//        cv::Mat abc = fRANSAC * homog_srcPoints.row(i)  ;
-//        float den = cv::sqrt(abc.at<double>(0,0) * abc.at<double>(0,0) + abc.at<double>(0,1) * abc.at<double>(0,1));
-//        cv::Mat dis = homog_dstPoints.row(i) * abc.t();
-//        F_dis.at<double>(i) = cv::sqrt(dis.at<double>(0,0) * dis.at<double>(0,0) /den);
-//    }
-//    mask = F_dis < 0.5;
-//    R = Rs.at(correctRT);
-//    t = ts.at(correctRT);
-    cv::Mat mask;
-    cv::Mat fRANSAC = cv::findFundamentalMat(srcPoints, dstPoints, cv::FM_RANSAC, 0.5, 0.999, mask);
-    fRANSAC.convertTo(fRANSAC, CV_32F);
-    cv::Mat E = mK.t() * fRANSAC * mK;
-    cout << E << endl;
+//    E= mK.t() * fRANSAC * mK;
+//    cout << E << endl;
     E = cv::findEssentialMat(srcPoints, dstPoints, mK, cv::RANSAC, 0.999, 0.5, mask);
-    cout << E << endl;
     cv::recoverPose(E, srcPoints, dstPoints, mK, R, t, mask);
-    for(MatConstIterator_<double> it = mask.begin<double>(); it!= mask.end<double>(); ++it)
-        if(*it>0)
-            inlierIndex.emplace_back(it-mask.begin<double>());
+
     //refine matches using epipolar constraint
+//    TODO: finish this code (follow the steps from the code)
 //    cv::Mat homog_srcPoints, homog_dstPoints;
 //    cv::convertPointsToHomogeneous(srcPoints, homog_srcPoints);
 //    cv::convertPointsToHomogeneous(dstPoints, homog_dstPoints);
@@ -366,17 +331,18 @@ void Tracking::solveRT(vector<cv::Point2f> srcPoints, vector<cv::Point2f> dstPoi
 //    mask = F_dis < 0.5;
 }
 
-float Tracking::InitialSolver(cv::Mat &R, cv::Mat &t, cv::Mat H, float &scaled_height, cv::Mat &n)
+void Tracking::InitialSolver(cv::Mat R, cv::Mat t, cv::Mat H, float &d0, cv::Mat &n)
 {
     Eigen::MatrixXf A_Eigen = Eigen::MatrixXf::Zero(9, 4);
     Eigen::MatrixXf B_Eigen = Eigen::MatrixXf::Zero(9, 1);
 
-    cv::Mat h = cv::Mat::zeros(3, 3, CV_32FC1);
-//    H.convertTo(H, CV_32FC1);
-//    K.convertTo(K, CV_32FC1);
-//    t.convertTo(t, CV_32FC1);
-//    R.convertTo(R, CV_32FC1);
-
+    cv::Mat K, h;
+    H.convertTo(H, CV_32FC1);
+    mK.convertTo(K, CV_32FC1);
+    t.convertTo(t, CV_32FC1);
+    R.convertTo(R, CV_32FC1);
+//    This part is copied from sai's code
+//
     h = mK.inv() * H * mK;//implemented just the homography decomposition part from their paper into this section - this is based on method proposed in 2008 paper to estimate scale
     //the 2014 paper author suggested to perform one more optimization and add kalman filtering to improve scale estimation accuracy, but that is not yet implemented here
 
@@ -432,17 +398,24 @@ float Tracking::InitialSolver(cv::Mat &R, cv::Mat &t, cv::Mat H, float &scaled_h
 
     //first way of solving Ax=B -> as good as possible
     Eigen::Vector4f X;
-//    X = A_Eigen.fullPivHouseholderQr().solve(B_Eigen);
-//    scaled_height = 1.0 / sqrt(pow(X(1), 2.0) + pow(X(2), 2.0) + pow(X(3), 2.0));
-    //cout << "Estimated Height = " << scaled_height << endl;
+    X = A_Eigen.fullPivHouseholderQr().solve(B_Eigen);
+    d0 = 1.0 / sqrt(pow(X(1), 2.0) + pow(X(2), 2.0) + pow(X(3), 2.0));
+    n = (cv::Mat_<float>(3,1) << X(1,0),
+                                 X(2,0),
+                                 X(3,0));
+    n = n / cv::norm(n);
 
     //second way of solving Ax=B
-    X = A_Eigen.jacobiSvd(Eigen::ComputeFullU | Eigen::ComputeFullV).solve(B_Eigen);
-    scaled_height = 1.0 / sqrt( pow(X(1), 2.0 ) + pow(X(2), 2.0 ) + pow(X(3), 2.0 ) );
-    return scaled_height;
-    cout << "Estimated Height = " << scaled_height << endl;
+//    X = A_Eigen.jacobiSvd(Eigen::ComputeFullU | Eigen::ComputeFullV).solve(B_Eigen);
+//    d0 = 1.0 / sqrt(pow(X(1), 2.0) + pow(X(2), 2.0) + pow(X(3), 2.0));
+//    n = (cv::Mat_<float>(3,1) << X(1,0),
+//            X(2,0),
+//            X(3,0));
+//    n = n / cv::norm(n);
+
 //    ==================================================================================================================
 
+//    This part is adapted from the paper's code
 //    cv::Mat mKInv = mK.inv();
 //    cv::Mat h = (mKInv * H) * mK;
 //    cv::Mat AA = (cv::Mat_<float>(9,4) << -h.at<float>(0,0), t.at<float>(0,0), 0, 0,
@@ -467,14 +440,10 @@ float Tracking::InitialSolver(cv::Mat &R, cv::Mat &t, cv::Mat H, float &scaled_h
 //                                          R.at<float>(2,1),
 //                                          R.at<float>(2,2));
 //    cv::Mat x;
-//    cv::solve(AA, B, x, DECOMP_SVD);
+//    cv::solve(AA, B, x, DECOMP_QR);
 //    d0 = 1.0 / cv::norm(x(cv::Range(1,4), cv::Range::all()));
-//    n = x(cv::Range(1,3), cv::Range(0,0));
+//    n = x(cv::Range(1,4), cv::Range(0,1));
 //    n = n / cv::norm(n);
-//    cout << "x is " << x << endl;
-//    float scaled_height = 1.0 / sqrt(pow(x.at<float>(1), 2.0) + pow(x.at<float>(2), 2.0) + pow(x.at<float>(3), 2.0));
-//    cout << d0 <<" "<< scaled_height << endl;
-//    return scaled_height;
 }
 
 float Tracking::EstimateScale(float &d, cv::Mat &n)
@@ -482,64 +451,63 @@ float Tracking::EstimateScale(float &d, cv::Mat &n)
 //    TODO: make this inside config file instead of hard coded in source code
 //  actual_height taken from http://www.cvlibs.net/datasets/kitti/eval_odometry_detail.php?&result=d568463c0d37f8029259debe61cc3b0f793818f2
     float actual_height = 1.7;
-    cv::Mat tmpCur, tmpPrev;
-    cv::undistort(mCurrentFrame.im, tmpCur, mK, mDistCoef);
-    cv::undistort(mLastFrame.im, tmpPrev, mK, mDistCoef);
-//    TODO: in order to try this effortlessly, I put the image in the Frame
-//      no check has been done to the memory used after this addition
-//      if the memory requrirement is suddenly very big, that is one of the cause
-    vector<cv::KeyPoint> kpCur, kpPrev;
-    cv::Mat descCur, descPrev;
-    cv::Ptr<cv::AKAZE> fdetector = cv::AKAZE::create();
-    fdetector->setThreshold(0.1e-4);
-    fdetector->detectAndCompute(tmpCur, cv::Mat(), kpCur, descCur);
-    fdetector->detectAndCompute(tmpPrev, cv::Mat(), kpPrev, descPrev);
 
-    // match
+//    This part of code is me wanting to use AKAZE descriptor instead of the readily available ORB descriptor.
+//    In the end, I did not use AKAZE, so I commented this out.
+//    In order to try this effortlessly, I put the image in the Frame
+//    no check has been done to the memory used after this addition
+//    if the memory requirement suddenly very big, that is one of the cause
+//    cv::Mat tmpCur, tmpPrev;
+//    cv::undistort(mCurrentFrame.im, tmpCur, mK, mDistCoef);
+//    cv::undistort(mLastFrame.im, tmpPrev, mK, mDistCoef);
+//    vector<cv::KeyPoint> kpCur, kpPrev;
+//    cv::Mat descCur, descPrev;
+//    cv::Ptr<cv::AKAZE> fdetector = cv::AKAZE::create();
+//    fdetector->setThreshold(0.1e-4);
+//    fdetector->detectAndCompute(tmpCur, cv::Mat(), kpCur, descCur);
+//    fdetector->detectAndCompute(tmpPrev, cv::Mat(), kpPrev, descPrev);
+
+//  Match the points between the last frame and the current frame
     cv::BFMatcher matcher(cv::NORM_HAMMING);
     vector<cv::DMatch> matches;
-    matcher.match(descPrev, descCur, matches);
+    matcher.match(mLastFrame.mDescriptors, mCurrentFrame.mDescriptors, matches);
     vector<cv::Point2f> srcPoint, dstPoint;
     for(cv::DMatch pairMatch: matches)
     {
-        srcPoint.emplace_back(kpPrev[pairMatch.queryIdx].pt);
-        dstPoint.emplace_back(kpCur[pairMatch.trainIdx].pt);
+        srcPoint.emplace_back(mLastFrame.mvKeys[pairMatch.queryIdx].pt);
+        dstPoint.emplace_back(mCurrentFrame.mvKeys[pairMatch.trainIdx].pt);
     }
-    cv::Mat R, t, H;
-    vector<int> inlierIndex;
-    // estimate RT
-    solveRT(srcPoint, dstPoint, R, t, inlierIndex);
-    cout << "R: " << R << endl;
-    cout << "t: " << t << endl;
-    cout << "Number of inlier after solveRT: " << inlierIndex.size() << endl;
-//  TODO: Find more efficient ways than this
-//  TODO: use openmp
-    vector<Point2f> temp;
-    for(int idx:inlierIndex)
-        temp.emplace_back(srcPoint[idx]);
-    srcPoint = temp;
-    for(int idx:inlierIndex)
-        temp.emplace_back(dstPoint[idx]);
-    dstPoint = temp;
 
-    // estimate H
-    inlierIndex.clear();
-    bool retval = solveH(srcPoint, dstPoint, H, inlierIndex);
-    cout << "Number of inlier after solveH: " << inlierIndex.size() << endl;
+    cv::Mat R, t, H, mask;
 
-    // estimate d
-    float scaled_height = InitialSolver(R, t, H, d, n);
-    // find scale
-    float scale = actual_height/scaled_height;
-    cout << "Estimated height: " << scaled_height << endl;
-    cout << "SCALE: " << scale << endl;
+//  estimate R and t using srcPoint and dstPoint
+//  filter srcPoint and dstPoint to only contain the inliers
+    solveRT(srcPoint, dstPoint, R, t, mask);
+    filterSrcAndDstPointsBasedOnMask(srcPoint, dstPoint, mask);
+//    cout << "Number of inlier after solveRT: " << inlierIndex.size() << endl;
+
+
+//  estimate H
+//  filter srcPoint and dstPoint to only contain the inliers
+//    TODO: handle case if homography failed
+    bool retval = solveH(srcPoint, dstPoint, H, mask);
+    filterSrcAndDstPointsBasedOnMask(srcPoint, dstPoint, mask);
+//    cout << "Number of inlier after solveH: " << inlierIndex.size() << endl;
+
+//  estimate d
+     InitialSolver(R, t, H, d, n);
+
+//    TODO: refine the height using the given equation from the paper + KalmanFilter
+
+//  find scale
+    float scale = actual_height/d;
+//    cout << "Estimated height: " << scaled_height << endl;
+//    cout << "SCALE: " << scale << endl;
     return scale;
 }
 
 cv::Mat Tracking::GrabImageMonocular(const cv::Mat &im, const double &timestamp)
 {
-    cv::Mat H;
-    vector<int> inlierIndex;
     mImGray.copyTo(mLastImGray);
     mImGray = im;
 
@@ -560,19 +528,9 @@ cv::Mat Tracking::GrabImageMonocular(const cv::Mat &im, const double &timestamp)
 
     if(mState==NOT_INITIALIZED || mState==NO_IMAGES_YET)
         mCurrentFrame = Frame(mImGray,timestamp,mpIniORBextractor,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth);
-    else {
-        mCurrentFrame = Frame(mImGray, timestamp, mpORBextractorLeft, mpORBVocabulary, mK, mDistCoef, mbf, mThDepth);
-//        solveH(vector<Point2f>(), vector<Point2f>(), H, inlierIndex);
-    }
-//    cout << "Number of key points: " << mCurrentFrame.mvKeys.size() << endl;
-//    cv::Mat imgTmp;
-//    mImGray.copyTo(imgTmp);
-//    cv::drawKeypoints(imgTmp, mCurrentFrame.mvKeys, imgTmp);
-//    string filename = "/media/sgp1053c/DATA/steven/ORB_SLAM2/imageTemp/" + to_string((int)(mCurrentFrame.mTimeStamp*10)) + ".png";
-//    bool res = cv::imwrite(filename, imgTmp);
-//    cout << timestamp << endl;
-//    if(res)cout << "image written to " << filename << endl;
-//    else cout << "cannot write!" << endl;
+    else
+        mCurrentFrame = Frame(mImGray,timestamp,mpORBextractorLeft,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth);
+
     Track();
 
     return mCurrentFrame.mTcw.clone();
@@ -744,9 +702,7 @@ void Tracking::Track()
             }
             else
                 mVelocity = cv::Mat();
-            cout << "Velocity" << endl;
-            cout << mVelocity << endl;
-            cout << norm(mVelocity(Range(0,3), Range(3,4))) << endl;
+
             mpMapDrawer->SetCurrentCameraPose(mCurrentFrame.mTcw);
 
             // Clean VO matches
@@ -768,6 +724,22 @@ void Tracking::Track()
                 delete pMP;
             }
             mlpTemporalPoints.clear();
+
+//          I (tried to) rescale the map every given interval
+//          Comment this section if you don't want to have scale correction
+//            if(mCurrentFrame.mTimeStamp - mTimeStampLastUpdate > SCALE_UPDATE_PERIOD)
+//            {
+////                This signals the need of rescaling .
+////                When the next key frame has been addeed, if this variable is true, then rescaling will be done.
+//                bNeedRescale = true;
+//                cout << "Rescaling..." << endl;
+////                This part of code is to just see the scale estimation performance.
+////                float d;
+////                cv::Mat n;
+////                float scale = EstimateScale(d,n);
+////                scaleHistory.push_back(scale);
+////                mTimeStampLastUpdate = mCurrentFrame.mTimeStamp;
+//            }
 
             // Check if we need to insert a new keyframe
             if(NeedNewKeyFrame())
@@ -1032,6 +1004,13 @@ void Tracking::CreateInitialMapMonocular()
             pMP->SetWorldPos(pMP->GetWorldPos()*scale);
         }
     }
+
+//  Initialise time stamp on last update with the current frame's time stamp
+    mTimeStampLastUpdate = mCurrentFrame.mTimeStamp;
+    bNeedRescale = false;
+    oldScale = scale;
+    n.copyTo(prevNormal);
+    scaleHistory.clear();
 
     mpLocalMapper->InsertKeyFrame(pKFini);
     mpLocalMapper->InsertKeyFrame(pKFcur);
@@ -1455,10 +1434,85 @@ void Tracking::CreateNewKeyFrame()
 
     mpLocalMapper->InsertKeyFrame(pKF);
 
-    mpLocalMapper->SetNotStop(false);
 
     mnLastKeyFrameId = mCurrentFrame.mnId;
     mpLastKeyFrame = pKF;
+
+    if(bNeedRescale)
+    {
+        Rescale();
+        bNeedRescale = false;
+        mTimeStampLastUpdate = mCurrentFrame.mTimeStamp;
+    }
+
+    mpLocalMapper->SetNotStop(false);
+}
+
+// Ground Plane based Absolute Scale Estimation for Monocular Visual Odometry
+// This rescaling function is implementing the scale correction proposed by this paper
+// https://arxiv.org/pdf/1903.00912.pdf
+void Tracking::Rescale()
+{
+    float d;
+    cv::Mat n;
+    float scale = EstimateScale(d,n);
+    cout << "Scale and previous scale: " << scale << " " << oldScale << endl;
+    cout << acos(n.dot(prevNormal)/(norm(n)*norm(prevNormal))) << endl;
+//    If the angle between normal from estimation and the last normal is greater that 5 degrees, do not rescale
+    if(acos(n.dot(prevNormal)/(norm(n)*norm(prevNormal))) > NORMAL_ANGLE_THRESHOLD)
+        return;
+
+    cout << "Rescaled" << endl;
+
+//  TODO: rescaling is very wrong
+
+    cout << "Local Coordinate Center ID: " <<  mpLastKeyFrame->mnId << endl;
+    sort(mvpLocalKeyFrames.begin(), mvpLocalKeyFrames.end(), KeyFrame::lId);
+
+//    Convert local map to local coordinate system
+//      Here, I assume that the local coordinate center is the mCurrentFrame
+//    Rescale using scale from scale estimation
+//    Convert back to global coordinate system
+        for(int i = 1 ; i < (int)mvpLocalKeyFrames.size() ; i++)
+        {
+            cout << "(" << mvpLocalKeyFrames[i]->mnId << ", " << mvpLocalKeyFrames[i]->mnFrameId << ") "; // (KeyFrameID, FrameID)
+            cv::Mat pose = mvpLocalKeyFrames[i-1]->GetPose() * mvpLocalKeyFrames[i]->GetPoseInverse();
+            pose.col(3).rowRange(0,3) = pose.col(3).rowRange(0,3) * scale /oldScale;
+            pose = mvpLocalKeyFrames[i-1]->GetPoseInverse() * pose.clone();
+            mvpLocalKeyFrames[i]->SetPose(pose.inv());
+        }
+        cout << endl;
+        mVelocity = cv::Mat(); // because the
+
+//        Here, I assume that the local coordinate center is mpReferenceKF
+//    for(int i = 0 ; i < (int)mvpLocalKeyFrames.size() ; i++)
+//    {
+//        cv::Mat pose = mpReferenceKF->GetPose() * mvpLocalKeyFrames[i]->GetPoseInverse();
+//        pose.col(3).rowRange(0,3) = pose.col(3).rowRange(0,3) * scale / oldScale;
+//        pose = mpReferenceKF->GetPoseInverse() * pose;
+//        mvpLocalKeyFrames[i]->SetPose(pose.clone());
+//
+//    }
+
+
+// TODO: finish this part
+
+//  This part is for the map points, I haven't finish this one since if the keyframe is wrong, I think the map points will
+//  be even more wrong.
+    for(int i = 0 ; i < (int)mvpLocalMapPoints.size() ; i++)
+    {
+
+        cv::Mat poseHomog = cv::Mat::ones(4,1,CV_32F), pose;
+        mvpLocalMapPoints[i]->GetWorldPos().copyTo(poseHomog.rowRange(0,3));
+        poseHomog = mpLastKeyFrame->GetPose() * poseHomog.clone();
+        poseHomog.col(0).rowRange(0,3) = poseHomog.col(0).rowRange(0,3) * scale/oldScale;
+        poseHomog = mpLastKeyFrame->GetPoseInverse() * poseHomog.clone();
+        pose = poseHomog.col(0).rowRange(0,3);
+        mvpLocalMapPoints[i]->SetWorldPos(pose);
+    }
+    oldScale = scale;
+    n.copyTo(prevNormal);
+//    Do local BA for refinement (optional)
 }
 
 void Tracking::SearchLocalPoints()

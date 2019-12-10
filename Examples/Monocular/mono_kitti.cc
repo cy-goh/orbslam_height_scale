@@ -34,6 +34,8 @@ using namespace std;
 void LoadImages(const string &strSequence, vector<string> &vstrImageFilenames,
                 vector<double> &vTimestamps);
 
+void SaveVectorFloat(vector<float> &vTimesTrack, string filename);
+
 int main(int argc, char **argv)
 {
     if(argc != 4)
@@ -107,6 +109,21 @@ int main(int argc, char **argv)
     // Stop all threads
     SLAM.Shutdown();
 
+//    argv[3] will be in format../kitti-dataset/sequences/XX
+//    we take the last two character as file name
+    string filenameTime = "TimeTrack-";
+    filenameTime+= argv[3][strlen(argv[3]) -2];
+    filenameTime+= argv[3][strlen(argv[3]) -1];
+    filenameTime+=".txt";
+    SaveVectorFloat(vTimesTrack, filenameTime);
+
+    string filenameScale = "Scale-";
+    filenameScale+= argv[3][strlen(argv[3]) -2];
+    filenameScale+= argv[3][strlen(argv[3]) -1];
+    filenameScale+=".txt";
+    SaveVectorFloat(SLAM.GetTracking()->scaleHistory, filenameScale);
+
+
     // Tracking time statistics
     sort(vTimesTrack.begin(),vTimesTrack.end());
     float totaltime = 0;
@@ -115,13 +132,31 @@ int main(int argc, char **argv)
         totaltime+=vTimesTrack[ni];
     }
     cout << "-------" << endl << endl;
+    cout << "maximum tracking time: " << vTimesTrack[nImages-1] << endl;
     cout << "median tracking time: " << vTimesTrack[nImages/2] << endl;
     cout << "mean tracking time: " << totaltime/nImages << endl;
 
     // Save camera trajectory
-    SLAM.SaveKeyFrameTrajectoryTUM("KeyFrameTrajectory.txt");    
+    string filename = "KeyFrameTrajectory-";
+    filename+= argv[3][strlen(argv[3]) -2];
+    filename+= argv[3][strlen(argv[3]) -1];
+    filename+=".txt";
+    SLAM.SaveKeyFrameTrajectoryTUM(filename);
 
     return 0;
+}
+
+void SaveVectorFloat(vector<float> &vTimesTrack, string filename)
+{
+    ofstream f;
+    f.open(filename.c_str());
+    f << fixed;
+
+    for(int i = 0 ; i < (int)vTimesTrack.size(); i++)
+    {
+        f << setprecision(6) << i << " " << vTimesTrack[i] << endl;
+    }
+    f.close();
 }
 
 void LoadImages(const string &strPathToSequence, vector<string> &vstrImageFilenames, vector<double> &vTimestamps)
