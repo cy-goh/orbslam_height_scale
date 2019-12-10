@@ -4,7 +4,7 @@ This project attempts to recover the absolute scale in the SLAM map produced by 
 [Ground Plane based Absolute Scale Estimation for Monocular Visual Odometry](https://arxiv.org/pdf/1903.00912.pdf) and
 [Reliable Scale Estimation and Correction for Monocular Visual Odometry](https://drive.google.com/file/d/0B73o7D_54u1LcFRPeWlIR1VubzA/view).
 
-## Summary of the paper:  
+## Summary of the paper
 To estimate scale, we use the assumption that the ground is planar. Then, between frame, the ground plane will be related by
 a homography matrix. Firstly, we recover the homography matrix. Then, separately, we recover the relative pose between the two frames.
 Using those two information, we can approximate the ground plane, represented using it's normal vector and the distance to the plane.
@@ -23,7 +23,7 @@ To correct the scale, the paper suggest the following:
 So far, scale estimation has been implemented, but most (if not all) refinement is yet to be done.  
 Scale correction is still not very good. We have yet to find a way to inject the scale mid-operation. This is further discussed below.
 
-## Other resources that might be helpful:
+## Other resources that might be helpful
 - [Author's implementation of the scale estimation](https://sites.google.com/site/dingfuzhou/projects/reliable-scale-estimation-and-correction-for-visual-odometry)
 - [ORB-SLAM](https://zaguan.unizar.es/record/32799/files/texto_completo.pdf)
 - [ORB-SLAM2](https://arxiv.org/pdf/1610.06475.pdf)
@@ -32,7 +32,7 @@ Part II D discuss more on the math behind decomposition on homography matrix.
 - [ORB-SLAM: a Versatile and Accurate Monocular SLAM System](http://cseweb.ucsd.edu/~mkchandraker/classes/CSE291/2017/Presentations/07_Real_Time_SFM_Sudhanshu.pdf)  
 This presentation is a good resources for ORB-SLAM
 
-## Scale estimation result:
+## Scale estimation
 - This is tested by inserting the scale when we initialise the map. The estimated scale will be computed using mCurrentFrame 
 and mLastFrame.  
 This is using the recommendation from [this issue](https://github.com/raulmur/ORB_SLAM2/issues/478#issuecomment-471955661) on ORB-SLAM2.
@@ -45,7 +45,7 @@ no filter is applied, the estimated scale is not robust.
 ![](image/Scale%20Estimation%20over%20Time.png)
 *Estimated Scale in Current Implementation*
 
-## Scale correction:
+## Scale correction
 - The paper said to rescale every keyFrames and mapPoints in the "current local map".  
 However, on further investigation, if the current local map mentioned is referring to the local map in the Tracking.cc, then the local map is not consecutive.
 In between keyframe that is in local map, there can be keyframes that is not in local map. This makes the rescaling result 
@@ -55,12 +55,12 @@ Most of the time mLastKeyFrame is +1 of the largest index in local map
 - Other definition that we can say about the local map is that it is the last X key frames.  
 However, if we want to correct the last X keyframes, we will need to have access to Map::mspKeyFrames and Map::mspKeyFrames, 
 both of which are protected attributes of Map. In addition, we have to make sure no other threads are updating to any keyframes 
-that we are modifying (possibly by setting up mutex).
+that we are modifying. [This comment](https://github.com/AlejandroSilvestri/ORB_SLAM2-documented/issues/1#issuecomment-331171379) might help.
 - The term *local coordinate system* and *local coordinate center* is also very ambiguous. I tried to use mCurrentFrame and mpReferenceKF,
 but both of them failed to give satisfactory result.
 - In the end, I also tried to use consecutive poses from local map. Sometime it's good, but once there is a missing frames, everything goes wrong.
 
-## Implementation:
+## Implementation
 Most of the code added is in Tracking.cc . List of modified files (compared to master):
 - Tracking.cc (and corresponding Tracking.h)
     - EstimateScale  
@@ -87,7 +87,20 @@ Most of the code added is in Tracking.cc . List of modified files (compared to m
         Since a lot of filter by cv::Mat mask needs to be done to both srcPoint and dstPoint, I make a function to do just that.
         It iterates over all points, if the mask is 0, then other point with mask = 1 will replace it. In the end, the vector is resized
         to the number of point with mask = 1.
-    - Rescale  
+    - CreateInitialMapMonocular (quite ok)  
+        This approach is based on [this comment](https://github.com/raulmur/ORB_SLAM2/issues/478#issuecomment-471955661).
+        I set the baseline of the first 2 frames to be the *scale* estimated from EstimateScale. 
+        Every map points' coordinate is also scaled accordingly. This makes the map to have metric scale (at least initially). 
+        As stated above, turning can cause scale drift, which cannot be prevented by setting up the right scale at the beginning.
+        Result:  
+        ![](image/Scale%20Inject%20on%20Initial%20Seq%2000.png)*Scale Injection on Sequence 00*  
+        ![](image/Scale%20Inject%20on%20Initial%20Seq%2006.png)*Scale Injection on Sequence 06*  
+        ![](image/Scale%20Inject%20on%20Initial%20Seq%2007.png)*Scale Injection on Sequence 07*  
+    - Track (wrong)  
+        If some time has passed since the last rescaling, I express the need for rescaling there.
+    - CreateNewKeyFrame (wrong)  
+        After creating new frame, if there is a need for rescaling, Rescale() will be invoked.
+    - Rescale (wrong)  
         Triggered whenever there is a need for rescaling, in the current implementation is every interval determined in 
         Tracking::SCALE_UPDATE_PERIOD.  
         It first finds the scale defined in EstimateScale(). Then, it checks the quality of the scale by comparing the normal vector
@@ -100,12 +113,6 @@ Most of the code added is in Tracking.cc . List of modified files (compared to m
         The same is done to all MapPoints in local map (mvpLocalMapPoints). Since the coordinate is not homogenous, we first convert the coordinate to homogenous form.
         Then, we transform them to the local coordinate center, rescale by multiplying with scale / old_scale, then transform back to global coordinate center.
         Convert the coordinate back to non-homogenous form. 
-    - Track  
-        If some time has passed since the last rescaling, I express the need for rescaling there.
-    - CreateInitialMapMonocular  
-        I set the baseline of the first 2 frames to be *scale*. Every map points is scaled by the same *scale*.
-    - CreateNewKeyFrame  
-        After creating new frame, if there is a need for rescaling, Rescale() will be invoked.
 - Frame.cc (and corresponding Frame.h)  
 I planned to use AKAZE as the descriptor, but I changed my mind. To use AKAZE, I planned to add Image information to the Frame.
 However, this might cause more memory consumption. So, the added code is commented. Other than that, nothing is changed.
@@ -115,7 +122,7 @@ Add getter to pointer to Tracking, to get ScaleHistory to be saved to file.
 Since my computer is having issues with framerate, I investigate the time used to track each image. I add the code to save the 
 time tracked to a file. Also, I output maximum tracking time.
 
-## Issues/TODO:
+## Issues/TODO
 - The computation (especially findHomography) takes quite some time (0.5 second).
 - (Almost) no refinement has been done.
 - Scale correction is still wrong
