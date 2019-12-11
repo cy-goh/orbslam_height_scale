@@ -3,9 +3,13 @@ Mirror of the code given by the author of the paper [Reliable Scale Estimation a
 Actual code is from [here](https://sites.google.com/site/dingfuzhou/projects/reliable-scale-estimation-and-correction-for-visual-odometry)
 
 ## Notes 
+The entry point of this algorithm starts from a 2 sets of point matches of 2 consecutive images. Point detection, descriptors and matching are done by the matcherMex (see below).
+
 Compared  the actual project, I deleted all the training images from ./04/image_0 , since the file size is quite big.  
 If you want to run this, please don't forget to download the dataset also. The dataset is image_0 from sequence 04 of KITTI
 dataset, link [here](http://www.cvlibs.net/datasets/kitti/eval_odometry.php), take the grayscale one.
+
+* For the case of ORB SLAM, scale estimation seemed to work with ORB descriptors and the ROI defined here (H_solver.m) *
 
 ## DemoNormalDirection.m
 Here, the author just want to demonstrate the result of the feature matching and find the initial solution to the equation
@@ -23,5 +27,5 @@ A graph is then shown, plotting the scale estimated over time compared to the gr
 ![](../../image/Ground%20Truth%20and%20Author's%20Code.png)
 
 ## matcherMex.mexw64
-This windows 64-bit binary is a matcher compiled from [libviso library](http://www.cvlibs.net/software/libviso/). We don't use matcher from libviso2 because it is 
+This windows 64-bit binary is a matcher compiled from [libviso library](http://www.cvlibs.net/software/libviso/). (point detection + feature descriptor + matching) We don't use matcher from libviso2 because it is 
 in GPL3. Github mirror [here](https://github.com/akhil22/libviso2).
