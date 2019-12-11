@@ -60,6 +60,7 @@ void LoopClosing::Run()
 
     while(1)
     {
+        // If you want to turn off the loop closing feature, the best way is to comment this part ...
         // Check if there are keyframes in the queue
         if(CheckNewKeyFrames())
         {
@@ -75,6 +76,7 @@ void LoopClosing::Run()
                }
             }
         }
+        // ... to this part
 
         ResetIfRequested();
 

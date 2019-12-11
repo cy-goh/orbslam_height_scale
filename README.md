@@ -4,6 +4,10 @@ This project attempts to recover the absolute scale in the SLAM map produced by 
 [Ground Plane based Absolute Scale Estimation for Monocular Visual Odometry](https://arxiv.org/pdf/1903.00912.pdf) and
 [Reliable Scale Estimation and Correction for Monocular Visual Odometry](https://drive.google.com/file/d/0B73o7D_54u1LcFRPeWlIR1VubzA/view).
 
+## Notes
+Since the rescaling part is not good, I turned it off for now. So, the default mode is just Scale Estimation without
+any Scale Corrections. If you want to add Scale Corrections, find in Tracking.cc "[SCALE CORRECTION]", uncomment the given code.
+
 ## Summary of the paper
 To estimate scale, we use the assumption that the ground is planar. Then, between frame, the ground plane will be related by
 a homography matrix. Firstly, we recover the homography matrix. Then, separately, we recover the relative pose between the two frames.
@@ -34,21 +38,25 @@ This presentation is a good resources for ORB-SLAM
 - [This commit](https://github.com/ykarmesh/ORB_SLAM2/commit/fb6298d95c4c9496e3feb050cbc1d25ea1c4179f) from 
 [this repository](https://github.com/ykarmesh/ORB_SLAM2) adds the capability to use 
 odometry in order to make each frame has metric scale.
+- [This repository](https://github.com/kafendt/ORB_SLAM2_Accessible) has quite detailed explanation on how ORB-SLAM2 works.
+- [Scale Estimation and Correction of the Monocular Simultaneous Localization and Mapping (SLAM) Based on Fusion of 1D Laser Range Finder and Vision Data](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6021903/)  
+The scale correction part is a bit similar to the main paper, may or may not be worth looking.
 
-## Scale estimation
+## Results
+### Scale estimation
 - This is tested by inserting the scale when we initialise the map. The estimated scale will be computed using mCurrentFrame 
 and mLastFrame.  
 This is using the recommendation from [this issue](https://github.com/raulmur/ORB_SLAM2/issues/478#issuecomment-471955661) on ORB-SLAM2.
 - The result is quite good. However, as soon as turning is introduced, the result turns really bad (scale drift). Also, since 
 no filter is applied, the estimated scale is not robust.
 
-![](image/Ground%20Truth%20and%20Author's%20Code.png)
+![](image/Ground%20Truth%20and%20Author's%20Code.png)  
 *Ground Truth and Estimated Scale on Author's Code, Sequence 04*  
 
-![](image/Scale%20Estimation%20over%20Time.png)
+![](image/Scale%20Estimation%20over%20Time.png)  
 *Estimated Scale in Current Implementation*
 
-## Scale correction
+### Scale correction
 - The paper said to rescale every keyFrames and mapPoints in the "current local map".  
 However, on further investigation, if the current local map mentioned is referring to the local map in the Tracking.cc, then the local map is not consecutive.
 In between keyframe that is in local map, there can be keyframes that is not in local map. This makes the rescaling result 
@@ -96,11 +104,14 @@ Most of the code added is in Tracking.cc . List of modified files (compared to m
         Every map points' coordinate is also scaled accordingly. This makes the map to have metric scale (at least initially). 
         As stated above, turning can cause scale drift, which cannot be prevented by setting up the right scale at the beginning.
         Result:  
-        ![](image/Scale%20Inject%20on%20Initial%20Seq%2000.png)*Scale Injection on Sequence 00*  
-        ![](image/Scale%20Inject%20on%20Initial%20Seq%2006.png)*Scale Injection on Sequence 06*  
-        ![](image/Scale%20Inject%20on%20Initial%20Seq%2007.png)*Scale Injection on Sequence 07*  
+        ![](image/Scale%20Inject%20on%20Initial%20Seq%2000.png)  
+        *Scale Injection on Sequence 00*  
+        ![](image/Scale%20Inject%20on%20Initial%20Seq%2006.png)  
+        *Scale Injection on Sequence 06*  
+        ![](image/Scale%20Inject%20on%20Initial%20Seq%2007.png)  
+        *Scale Injection on Sequence 07*  
     - Track (wrong)  
-        If some time has passed since the last rescaling, I express the need for rescaling there.
+        If some time has passed since the last rescaling, I express the need for rescaling there.  
     - CreateNewKeyFrame (wrong)  
         After creating new frame, if there is a need for rescaling, Rescale() will be invoked.
     - Rescale (wrong)  
@@ -127,6 +138,8 @@ time tracked to a file. Also, I output maximum tracking time.
 
 ## Issues/TODO
 - The computation (especially findHomography) takes quite some time (0.5 second).
+    - On a second thought, I don't think the findHomography cause the time to spike to 0.5 seconds. Can further investigate on 
+    this matter.
 - (Almost) no refinement has been done.
 - Scale correction is still wrong
 - Haven't handle case when findHomography failed
@@ -134,6 +147,8 @@ time tracked to a file. Also, I output maximum tracking time.
     - Can also just not do the scale correction at that time
 - In the current implementation, if the scale's quality is not good (normal vector is not close enough), we wait for another interval.  
 Maybe that is too long. What if we make such that if the quality not good, then after X frames we try again.
+- I don't know how to turn off Global Bundle Adjustment. Currently, the quick fix is just to turn off Loop Closing module.
+
 
 -------------------------------------------------------------
 
