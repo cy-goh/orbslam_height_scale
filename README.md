@@ -31,6 +31,9 @@ Scale correction is still not very good. We have yet to find a way to inject the
 Part II D discuss more on the math behind decomposition on homography matrix.
 - [ORB-SLAM: a Versatile and Accurate Monocular SLAM System](http://cseweb.ucsd.edu/~mkchandraker/classes/CSE291/2017/Presentations/07_Real_Time_SFM_Sudhanshu.pdf)  
 This presentation is a good resources for ORB-SLAM
+- [This commit](https://github.com/ykarmesh/ORB_SLAM2/commit/fb6298d95c4c9496e3feb050cbc1d25ea1c4179f) from 
+[this repository](https://github.com/ykarmesh/ORB_SLAM2) adds the capability to use 
+odometry in order to make each frame has metric scale.
 
 ## Scale estimation
 - This is tested by inserting the scale when we initialise the map. The estimated scale will be computed using mCurrentFrame 
