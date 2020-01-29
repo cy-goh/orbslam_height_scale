@@ -74,7 +74,9 @@ public:
     bool isFinishedGBA(){
         unique_lock<std::mutex> lock(mMutexGBA);
         return mbFinishedGBA;
-    }   
+    }
+    //added by CY
+    void StopGBA();   
 
     void RequestFinish();
 

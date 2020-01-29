@@ -37,6 +37,7 @@
 #include<iostream>
 
 #include<mutex>
+#include <chrono>
 
 
 using namespace std;
@@ -272,7 +273,7 @@ bool Tracking::solveH(vector<Point2f> &srcPoint, vector<Point2f> &dstPoint, cv::
 //    else cout << "cannot write!" << endl;
 
     // Now we find the Homography matrix between the two ground planes.
-    H = findHomography(srcPointROI, dstPointROI, cv::RANSAC, 1.5, mask);
+    H = findHomography(srcPointROI, dstPointROI, cv::RANSAC, 1.5, mask);	
     H.convertTo(H, CV_32F);
 
     // TODO: refine homography matrix
@@ -311,8 +312,15 @@ void Tracking::solveRT(vector<cv::Point2f> &srcPoints, vector<cv::Point2f> &dstP
 //    fRANSAC.convertTo(fRANSAC, CV_32F);
 //    E= mK.t() * fRANSAC * mK;
 //    cout << E << endl;
-    E = cv::findEssentialMat(srcPoints, dstPoints, mK, cv::RANSAC, 0.999, 0.5, mask);
+  	 auto start = std::chrono::high_resolution_clock::now();
+  	 cout << "points " << srcPoints.size() << endl;
+    E = cv::findEssentialMat(srcPoints, dstPoints, mK, cv::RANSAC, 0.999, .5, mask);
+     	auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>( end - start ).count();
+    cout << "duration of essentialmat  " << duration << endl;
     cv::recoverPose(E, srcPoints, dstPoints, mK, R, t, mask);
+
+
 
     // refine matches using epipolar constraint
     // TODO: finish this code (follow the steps from the code)
@@ -342,6 +350,8 @@ void Tracking::InitialSolver(cv::Mat R, cv::Mat t, cv::Mat H, float &d0, cv::Mat
     t.convertTo(t, CV_32FC1);
     R.convertTo(R, CV_32FC1);
     // This part is copied from sai's code
+
+    cout << "mk is " << mK << endl;
 
     h = mK.inv() * H * mK;//implemented just the homography decomposition part from their paper into this section - this is based on method proposed in 2008 paper to estimate scale
     //the 2014 paper author suggested to perform one more optimization and add kalman filtering to improve scale estimation accuracy, but that is not yet implemented here
@@ -398,20 +408,28 @@ void Tracking::InitialSolver(cv::Mat R, cv::Mat t, cv::Mat H, float &d0, cv::Mat
 
     //first way of solving Ax=B -> as good as possible
     Eigen::Vector4f X;
-    X = A_Eigen.fullPivHouseholderQr().solve(B_Eigen);
-    d0 = 1.0 / sqrt(pow(X(1), 2.0) + pow(X(2), 2.0) + pow(X(3), 2.0));
-    n = (cv::Mat_<float>(3,1) << X(1,0),
-                                 X(2,0),
-                                 X(3,0));
-    n = n / cv::norm(n);
+    // X = A_Eigen.fullPivHouseholderQr().solve(B_Eigen);
+    // d0 = 1.0 / sqrt(pow(X(1), 2.0) + pow(X(2), 2.0) + pow(X(3), 2.0));
+    // cout << "d0 is" << d0 << endl;
+    // cout << "R is " << R << endl;
+    // cout << "t is " << t << endl;
+    // cout << "X is " << X << endl;
+    // n = (cv::Mat_<float>(3,1) << X(1,0),
+    //                              X(2,0),
+    //                              X(3,0));
+    // n = n / cv::norm(n);
 
     //second way of solving Ax=B
-//    X = A_Eigen.jacobiSvd(Eigen::ComputeFullU | Eigen::ComputeFullV).solve(B_Eigen);
-//    d0 = 1.0 / sqrt(pow(X(1), 2.0) + pow(X(2), 2.0) + pow(X(3), 2.0));
-//    n = (cv::Mat_<float>(3,1) << X(1,0),
-//            X(2,0),
-//            X(3,0));
-//    n = n / cv::norm(n);
+   X = A_Eigen.jacobiSvd(Eigen::ComputeFullU | Eigen::ComputeFullV).solve(B_Eigen);
+   d0 = 1.0 / sqrt(pow(X(1), 2.0) + pow(X(2), 2.0) + pow(X(3), 2.0));
+   n = (cv::Mat_<float>(3,1) << X(1,0),
+           X(2,0),
+           X(3,0));
+   n = n / cv::norm(n);
+       cout << "d0 is" << d0 << endl;
+    cout << "R is " << R << endl;
+    cout << "t is " << t << endl;
+    cout << "X is " << X << endl;
 
 //    ==================================================================================================================
 
@@ -470,7 +488,22 @@ float Tracking::EstimateScale(float &d, cv::Mat &n)
     // Match the points between the last frame and the current frame
     cv::BFMatcher matcher(cv::NORM_HAMMING);
     vector<cv::DMatch> matches;
-    matcher.match(mLastFrame.mDescriptors, mCurrentFrame.mDescriptors, matches);
+    vector<vector<cv::DMatch> > nn_matches;
+    matcher.knnMatch(mLastFrame.mDescriptors, mCurrentFrame.mDescriptors, nn_matches, 2);
+
+    vector<cv::DMatch> good_matches;
+    for (size_t i = 0; i < nn_matches.size(); i++) {
+        DMatch first = nn_matches[i][0];
+        float dist1 = nn_matches[i][0].distance;
+        float dist2 = nn_matches[i][1].distance;
+        if (dist1 < 0.85 * dist2) {
+            good_matches.push_back(nn_matches[i][0]);
+        }
+    }
+
+    matches.swap(good_matches);
+
+    // matcher.match(mLastFrame.mDescriptors, mCurrentFrame.mDescriptors, matches);
     vector<cv::Point2f> srcPoint, dstPoint;
     for(cv::DMatch pairMatch: matches)
     {
@@ -482,7 +515,12 @@ float Tracking::EstimateScale(float &d, cv::Mat &n)
 
     // estimate R and t using srcPoint and dstPoint
     // filter srcPoint and dstPoint to only contain the inliers
+    	 auto start = std::chrono::high_resolution_clock::now();
+
     solveRT(srcPoint, dstPoint, R, t, mask);
+ 	auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>( end - start ).count();
+    cout << "duration of solvert " << duration << endl;
     filterSrcAndDstPointsBasedOnMask(srcPoint, dstPoint, mask);
 //    cout << "Number of inlier after solveRT: " << inlierIndex.size() << endl;
 
@@ -490,12 +528,23 @@ float Tracking::EstimateScale(float &d, cv::Mat &n)
     // estimate H
     // filter srcPoint and dstPoint to only contain the inliers
     // TODO: handle case if homography failed
+        //auto start = chrono::high_resolution_clock::now();
     bool retval = solveH(srcPoint, dstPoint, H, mask);
+
+	// auto end = std::chrono::high_resolution_clock::now();
+ //    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>( end - start ).count();
+ //        cout << "duration of homography " << duration << endl;
+
     filterSrcAndDstPointsBasedOnMask(srcPoint, dstPoint, mask);
+
 //    cout << "Number of inlier after solveH: " << inlierIndex.size() << endl;
 
     // estimate d
+	// auto start = std::chrono::high_resolution_clock::now();
      InitialSolver(R, t, H, d, n);
+ 	// auto end = std::chrono::high_resolution_clock::now();
+    // auto duration = std::chrono::duration_cast<std::chrono::milliseconds>( end - start ).count();
+    // cout << "duration of init solver " << duration << endl;
 
     // TODO: refine the height using the given equation from the paper + KalmanFilter
 
@@ -503,6 +552,7 @@ float Tracking::EstimateScale(float &d, cv::Mat &n)
     float scale = actual_height/d;
 //    cout << "Estimated height: " << scaled_height << endl;
 //    cout << "SCALE: " << scale << endl;
+    //return scale;
     return scale;
 }
 
@@ -727,18 +777,18 @@ void Tracking::Track()
 
             // [SCALE CORRECTION] I (tried to) rescale the map every given interval
             // Comment this section if you don't want to have scale correction
-//            if(mCurrentFrame.mTimeStamp - mTimeStampLastUpdate > SCALE_UPDATE_PERIOD)
-//            {
-//                // This signals the need of rescaling .
-//                // When the next key frame has been addeed, if this variable is true, then rescaling will be done.
-//                bNeedRescale = true;
-//                // This part of code is to just see the scale estimation performance.
-//                float d;
-//                cv::Mat n;
-//                float scale = EstimateScale(d,n);
-//                scaleHistory.push_back(scale);
-//                mTimeStampLastUpdate = mCurrentFrame.mTimeStamp;
-//            }
+           if(mCurrentFrame.mTimeStamp - mTimeStampLastUpdate > SCALE_UPDATE_PERIOD)
+           {
+               // This signals the need of rescaling .
+               // When the next key frame has been addeed, if this variable is true, then rescaling will be done.
+               bNeedRescale = true;
+               // This part of code is to just see the scale estimation performance.
+               float d;
+            //    cv::Mat n;
+            //    float scale = EstimateScale(d,n);
+            //    scaleHistory.push_back(scale);
+               mTimeStampLastUpdate = mCurrentFrame.mTimeStamp;
+           }
 
             // Check if we need to insert a new keyframe
             if(NeedNewKeyFrame())
@@ -973,14 +1023,21 @@ void Tracking::CreateInitialMapMonocular()
     Optimizer::GlobalBundleAdjustemnt(mpMap,20);
 
     // Set median depth to 1
-//    float medianDepth = pKFini->ComputeSceneMedianDepth(2);
-//    float invMedianDepth = 1.0f/medianDepth;
+    float medianDepth = pKFini->ComputeSceneMedianDepth(2);
+    float invMedianDepth = 1.0f/medianDepth;
     float d;
     cv::Mat n;
+	auto start = std::chrono::high_resolution_clock::now();
     float scale = EstimateScale(d, n);
+	auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>( end - start ).count();
+    cout << "duration of scale " << duration << endl;
+
+    cout << "scale is " << scale << endl;
 
 
     if(scale<0 || pKFcur->TrackedMapPoints(1)<100)
+    // if(medianDepth<0 || pKFcur->TrackedMapPoints(1)<100)
     {
         cout << "Wrong initialization, reseting..." << endl;
         Reset();
@@ -989,6 +1046,8 @@ void Tracking::CreateInitialMapMonocular()
 
     // Scale initial baseline
     cv::Mat Tc2w = pKFcur->GetPose();
+    // Tc2w.col(3).rowRange(0,3) = Tc2w.col(3).rowRange(0,3)*invMedianDepth;
+    cout << "norm is " << cv::norm(Tc2w.col(3).rowRange(0,3)) << endl;
     Tc2w.col(3).rowRange(0,3) = Tc2w.col(3).rowRange(0,3)*scale;
     pKFcur->SetPose(Tc2w);
 
@@ -1000,7 +1059,8 @@ void Tracking::CreateInitialMapMonocular()
         if(vpAllMapPoints[iMP])
         {
             MapPoint* pMP = vpAllMapPoints[iMP];
-            pMP->SetWorldPos(pMP->GetWorldPos()*scale);
+            //pMP->SetWorldPos(pMP->GetWorldPos()*invMedianDepth);
+             pMP->SetWorldPos(pMP->GetWorldPos()*scale);
         }
     }
 
@@ -1448,7 +1508,10 @@ void Tracking::CreateNewKeyFrame()
 // https://arxiv.org/pdf/1903.00912.pdf
 void Tracking::Rescale()
 {
-    cout << "Rescaling..." << endl;
+        static int c = 0;
+        // if (c > 2) return;
+
+    cout << "===================\nRescaling..." << endl;
 
     // I think that if you want to modify the KeyFrame and MapPoints, still need to make sure that no other thread is using.
     // I don't know how to turned off the GBA in Tracking thread, so I just turned off the loop closing thread
@@ -1461,10 +1524,15 @@ void Tracking::Rescale()
     // TODO: It is assumed that we turned off the Loop Closing Module
     //       If you need that module, need to make sure GBA is stopped before continuing
 
+    if (mpLoopClosing->isRunningGBA())
+    {
+        mpLoopClosing->StopGBA();
+    }
+
     // Wait until Local Mapping has effectively stopped
     while(!mpLocalMapper->isStopped())
     {
-        cout << "Waiting..." << endl;
+        //cout << "Waiting..." << endl;
         usleep(1000);
     }
 
@@ -1475,14 +1543,19 @@ void Tracking::Rescale()
     float d;
     cv::Mat n;
     float scale = EstimateScale(d,n);
-    cout << "Scale and previous scale: " << scale << " " << oldScale << endl;
-    cout << acos(n.dot(prevNormal)/(norm(n)*norm(prevNormal)))* 180 / M_PI << endl;
+    cout << "Scale, previous scale, angle: " << scale << " " << oldScale << " " << acos(n.dot(prevNormal)/(norm(n)*norm(prevNormal)))* 180 / M_PI << endl;
+    cout << "Current NOrmal: " << n << endl;
+
+
+    //cout << "current frame pose: \n" << mCurrentFrame.mTcw<< endl;
 
     // If the angle between normal from estimation and the last normal is greater that 5 degrees, do not rescale
-    if(acos(n.dot(prevNormal)/(norm(n)*norm(prevNormal))) < NORMAL_ANGLE_THRESHOLD)
+     if(acos(n.dot(prevNormal)/(norm(n)*norm(prevNormal))) < NORMAL_ANGLE_THRESHOLD)
     {
         // Since the scale is good, we accept the scale and perform the rescaling
         cout << "Scale accepted" << endl;
+        c++;
+        //unique_lock<mutex> lock(mpMap->mMutexMapUpdate);
 
         // TODO: rescaling is very wrong
 
@@ -1494,25 +1567,66 @@ void Tracking::Rescale()
         // Rescale using scale from scale estimation
         // Convert back to global coordinate system
 
+        //added by CY: this is from KeyFrame.cc setPose. Get Twc so as to setup local Coordinate System
+        cv::Mat TcwCorrected = mCurrentFrame.mTcw.clone();
+        TcwCorrected.rowRange(0,3).col(3) = TcwCorrected.rowRange(0, 3).col(3) * scale / oldScale;
+        //cv::Mat Tlc = mLastFrame.mTcw * mCurrentFrame.mTcw.inv();
+        // float oldScale1 = cv::norm(Tlc.rowRange(0,3).col(3));
+        //Tlc.rowRange(0, 3).col(3) = Tlc.rowRange(0,3).col(3) * scale / oldScale;// / oldScale1;
+        //cv::Mat correctedCurFramePose = Tlc.inv() * mLastFrame.mTcw;
+        // mCurrentFrame.mTcw = Tlc.inv() * mLastFrame.mTcw;
+        //mpLastKeyFrame->SetPose(correctedCurFramePose);
+        mpLastKeyFrame->SetPose(TcwCorrected);
+        mpLastKeyFrame->UpdateConnections();
+
+        cv::Mat Twc = mCurrentFrame.mTcw.clone().inv();
+
+        cout << "current id " << mCurrentFrame.mnId << " " << mpLastKeyFrame->mnFrameId << endl;
+        // cout << mCurrentFrame.mTcw << endl << "Reference:" << mCurrentFrame.mpReferenceKF->mnFrameId << endl;
+        // cout << "compare " << mpLastKeyFrame->GetPose() << mCurrentFrame.mTcw << endl;
+
         // This is for the KeyFrames
         for(int i = 0 ; i < (int)mvpLocalKeyFrames.size() ; i++)
         {
 //            cout << "(" << mvpLocalKeyFrames[i]->mnId << ", " << mvpLocalKeyFrames[i]->mnFrameId << ") "; // (KeyFrameID, FrameID)
-            cv::Mat pose = mpReferenceKF->GetPose() * mvpLocalKeyFrames[i]->GetPoseInverse();
+/*             cv::Mat pose = mpReferenceKF->GetPose() * mvpLocalKeyFrames[i]->GetPoseInverse();
             pose.col(3).rowRange(0,3) = pose.col(3).rowRange(0,3) * scale / oldScale;
             pose = mpReferenceKF->GetPoseInverse() * pose.clone();
-            mvpLocalKeyFrames[i]->SetPose(pose.inv());
+            mvpLocalKeyFrames[i]->SetPose(pose.inv()); */
 //            mvpLocalKeyFrames[i]->UpdateConnections();
+
+            //added by CY
+            //comments: ok now i got the scale from Tic.
+
+            cv::Mat Tic = mvpLocalKeyFrames[i]->GetPose() * Twc; //Tiw * Twc
+            // float oldScale = cv::norm(Tic.rowRange(0,3).col(3));
+            Tic.rowRange(0, 3).col(3) = Tic.rowRange(0,3).col(3) * scale  / oldScale;
+            cv::Mat TiwCorrected = Tic * TcwCorrected;
+            mvpLocalKeyFrames[i]->SetPose(TiwCorrected);
+            mvpLocalKeyFrames[i]->UpdateConnections();
+
+            // cout << "before: " << tmp << endl;
+            // cout << "after: " << TiwCorrected << endl;
+            //end added by CY
         }
 //        cout << endl;
-        cv::Mat curPose = mpReferenceKF->GetPose() * mLastFrame.mTcw.inv();
-        curPose.col(3).rowRange(0,3) = curPose.col(3).rowRange(0,3) * scale / oldScale;
-        curPose = mpReferenceKF->GetPoseInverse() * curPose.clone();
-        mLastFrame.SetPose(curPose);
 
-        mVelocity = mpReferenceKF->GetPose() * mVelocity.clone();
+        //commented by cy: I dont think this is needed
+        //cv::Mat curPose = mpReferenceKF->GetPose() * mLastFrame.mTcw.inv();
+        //curPose.col(3).rowRange(0,3) = curPose.col(3).rowRange(0,3) * scale / oldScale;
+        //curPose = mpReferenceKF->GetPoseInverse() * curPose.clone();
+        //mLastFrame.SetPose(curPose);
+
+        //mVelocity = mpReferenceKF->GetPose() * mVelocity.clone();
+        //mVelocity.col(3).rowRange(0,3) = mVelocity.col(3).rowRange(0,3) * scale / oldScale;
+        //mVelocity = mpReferenceKF->GetPoseInverse() * mVelocity.clone();
+
+        //added by CY
+        cv::Mat bv = mVelocity.clone();
+        // float oldScale = cv::norm(mVelocity.rowRange(0,3).col(3));
         mVelocity.col(3).rowRange(0,3) = mVelocity.col(3).rowRange(0,3) * scale / oldScale;
-        mVelocity = mpReferenceKF->GetPoseInverse() * mVelocity.clone();
+        // cout << "scale: " << oldScale << " " << scale << endl;
+        // cout << "Before velocity " << bv << endl << mVelocity << endl;
 
         //  This part is for the map points, I haven't finish this one since if the keyframe is wrong, I think the map points will
         //  be even more wrong.
@@ -1520,22 +1634,51 @@ void Tracking::Rescale()
         for(int i = 0 ; i < (int)mvpLocalMapPoints.size() ; i++)
         {
             cv::Mat poseHomog = cv::Mat::ones(4,1,CV_32F), pose;
-            mvpLocalMapPoints[i]->GetWorldPos().copyTo(poseHomog.rowRange(0,3));
-            poseHomog = mpReferenceKF->GetPose() * poseHomog.clone();
-            poseHomog.col(0).rowRange(0,3) = poseHomog.col(0).rowRange(0,3) * scale / oldScale;
-            poseHomog = mpReferenceKF->GetPoseInverse() * poseHomog.clone();
-            pose = poseHomog.col(0).rowRange(0,3);
+            mvpLocalMapPoints[i]->GetWorldPos().copyTo(poseHomog.rowRange(0,3)); //poseHomog is T_pw
+
+            //  cout << "before pt " << poseHomog.rowRange(0,3);
+
+            poseHomog = Twc * poseHomog; //Tpc
+            //float oldScale = cv::norm(poseHomog.rowRange(0,3).col(0));
+
+            //point from current frame, transform back to global coordinate
+            poseHomog.rowRange(0,3).col(0) = poseHomog.rowRange(0,3).col(0) * scale / oldScale;
+            cv::Mat pGlobal =  TcwCorrected * poseHomog;
+            pose = pGlobal.rowRange(0,3);
+            //  cout << " after pt " << pose << endl;
+
+            //  g2o::Sim3
+
             mvpLocalMapPoints[i]->SetWorldPos(pose);
+            mvpLocalMapPoints[i]->UpdateNormalAndDepth();
+
+            // cout << "size " << pGlobal.rows << " " << pGlobal.cols << endl;
+            //poseHomog = mpReferenceKF->GetPose() * poseHomog.clone();
+            //poseHomog.rowRange(0,3).col(3) = poseHomog.rowRange(0,3).col(3) * scale / oldScale;
+            // poseHomog = mpReferenceKF->GetPoseInverse() * poseHomog.clone();
+            //pose = poseHomog.col(0).rowRange(0,3);
+            //mvpLocalMapPoints[i]->SetWorldPos(pose);
         }
+
 
         oldScale = scale;
         n.copyTo(prevNormal);
         bNeedRescale = false;
         mTimeStampLastUpdate = mCurrentFrame.mTimeStamp;
+
+        mCurrentFrame.SetPose(TcwCorrected);
         //    Do local BA for refinement (optional)
+
     }
     // Allow the Local Mapper to continue
+    // UpdateLocalMap();
     mpLocalMapper->Release();
+    
+    mpMapDrawer->DrawMapPoints();
+
+    // bool test = false;
+    // Optimizer::LocalBundleAdjustment(mpLastKeyFrame, &test, mpMap);
+
 }
 
 void Tracking::SearchLocalPoints()

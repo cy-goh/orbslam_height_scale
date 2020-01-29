@@ -401,6 +401,23 @@ bool LoopClosing::ComputeSim3()
 
 }
 
+//added by CY: stolen from LoopClosing::CorrectLoop
+void LoopClosing::StopGBA()
+{
+    unique_lock<mutex> lock(mMutexGBA);
+    mbStopGBA = true;
+
+    mnFullBAIdx++;
+
+    if(mpThreadGBA)
+    {
+        mpThreadGBA->detach();
+        delete mpThreadGBA;
+    }
+
+    std::cout << "Stopping global bundle adjustment.." << std::endl;
+}
+
 void LoopClosing::CorrectLoop()
 {
     cout << "Loop detected!" << endl;
