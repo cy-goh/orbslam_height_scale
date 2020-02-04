@@ -29,7 +29,10 @@ df_truth.rename(columns={3:"x", 11:"z"}, inplace=True)
 
 df_combine = pd.concat([df_orb_lcse, df_truth])
 
-sb.lineplot(x="x", y="z", hue="Type", data=df_combine, sort=False)
+#sb.lineplot(x="x", y="z", hue="Type", data=df_combine, sort=False)
+sb.scatterplot(x="x", y="z", hue="Type", data=df_combine)
+
+
 
 ax.legend()
 plt.axis('equal')

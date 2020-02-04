@@ -102,6 +102,13 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
         mpTracker->SetViewer(mpViewer);
     }
 
+    //TODO: remove this
+    mpLoopCloser->RequestFinish();
+    while(!mpLoopCloser->isFinished())
+    {
+        usleep(5000);
+    }
+
     //Set pointers between threads
     mpTracker->SetLocalMapper(mpLocalMapper);
     mpTracker->SetLoopClosing(mpLoopCloser);

@@ -371,6 +371,7 @@ int Optimizer::PoseOptimization(Frame *pFrame)
     const int its[4]={10,10,10,10};    
 
     int nBad=0;
+
     for(size_t it=0; it<4; it++)
     {
 
