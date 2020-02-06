@@ -153,6 +153,10 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
 
 }
 
+inline float cosine_angle(cv::Mat n1, cv::Mat n2) {
+    return acos(n1.dot(n2)/(norm(n1)*norm(n2)) );
+}
+
 void Tracking::SetLocalMapper(LocalMapping *pLocalMapper)
 {
     mpLocalMapper=pLocalMapper;
@@ -276,7 +280,9 @@ bool Tracking::solveH(vector<Point2f> &srcPoint, vector<Point2f> &dstPoint, cv::
 //    else cout << "cannot write!" << endl;
 
     // Now we find the Homography matrix between the two ground planes.
-    H = findHomography(srcPointROI, dstPointROI, cv::RANSAC, 1.5, mask);	
+    // H = findHomography(srcPointROI, dstPointROI, cv::RANSAC, 1.5, mask);	
+    //TODO: check this value
+    H = findHomography(srcPointROI, dstPointROI, cv::RANSAC, 2., mask);	
     H.convertTo(H, CV_32F);
 
     // TODO: refine homography matrix
@@ -353,8 +359,6 @@ void Tracking::InitialSolver(cv::Mat R, cv::Mat t, cv::Mat H, float &d0, cv::Mat
     t.convertTo(t, CV_32FC1);
     R.convertTo(R, CV_32FC1);
     // This part is copied from sai's code
-
-    cout << "mk is " << mK << endl;
 
     h = mK.inv() * H * mK;//implemented just the homography decomposition part from their paper into this section - this is based on method proposed in 2008 paper to estimate scale
     //the 2014 paper author suggested to perform one more optimization and add kalman filtering to improve scale estimation accuracy, but that is not yet implemented here
@@ -467,11 +471,12 @@ void Tracking::InitialSolver(cv::Mat R, cv::Mat t, cv::Mat H, float &d0, cv::Mat
 //    n = n / cv::norm(n);
 }
 
-float Tracking::EstimateScale(float &d, cv::Mat &n)
+float Tracking::EstimateScale(float &d, cv::Mat &n, cv::Mat refR, cv::Mat refT)
 {
     // TODO: make this inside config file instead of hard coded in source code
     // actual_height taken from http://www.cvlibs.net/datasets/kitti/eval_odometry_detail.php?&result=d568463c0d37f8029259debe61cc3b0f793818f2
-    float actual_height = 1.7;
+    const float actual_height = 1.7;
+
 
     // This part of code is me wanting to use AKAZE descriptor instead of the readily available ORB descriptor.
     // In the end, I did not use AKAZE, so I commented this out.
@@ -544,7 +549,14 @@ float Tracking::EstimateScale(float &d, cv::Mat &n)
 
     // estimate d
 	// auto start = std::chrono::high_resolution_clock::now();
-     InitialSolver(R, t, H, d, n);
+    if (refR.empty() || refT.empty())
+        InitialSolver(R, t, H, d, n);
+    else {
+        cout << "t: " << t << endl;
+        cout << "Ref t: " << refT << endl;    
+        InitialSolver(refR, refT, H, d, n);
+    }
+
  	// auto end = std::chrono::high_resolution_clock::now();
     // auto duration = std::chrono::duration_cast<std::chrono::milliseconds>( end - start ).count();
     // cout << "duration of init solver " << duration << endl;
@@ -785,7 +797,7 @@ void Tracking::Track()
            {
                // This signals the need of rescaling .
                // When the next key frame has been addeed, if this variable is true, then rescaling will be done.
-                // bNeedRescale = true;
+                bNeedRescale = true;
                // This part of code is to just see the scale estimation performance.
             //    float d;
             //    cv::Mat n;
@@ -1032,13 +1044,41 @@ void Tracking::CreateInitialMapMonocular()
     float d;
     cv::Mat n;
 	auto start = std::chrono::high_resolution_clock::now();
-    float scale = EstimateScale(d, n);
+
+    cv::Mat R = pKFcur->GetRotation();
+    // cv::Mat R = pKFcur->GetRotation().t();
+    cv::Mat t = pKFcur->GetPose().rowRange(0, 3).col(3);
+    // cv::Mat t = pKFcur->GetCameraCenter();
+
+    const float pitch_rot = 4. * M_PI/180.;
+    Eigen::Vector4f v(0, 1, 0, 1);
+    Eigen::Matrix4f eigRot = Eigen::Matrix4f::Identity();
+    eigRot(1, 1) = cos(pitch_rot);
+    eigRot(1, 2) = -sin(pitch_rot);
+    eigRot(2, 1) = sin(pitch_rot);
+    eigRot(2, 2) = cos(pitch_rot);
+    Eigen::Vector4f normal_prior = eigRot * v;
+    cv::Mat prior_cv(3, 1, CV_32F);
+    prior_cv.at<float>(0, 0) = normal_prior(0);
+    prior_cv.at<float>(1, 0) = normal_prior(1);
+    prior_cv.at<float>(2, 0) = normal_prior(2);
+    cout << "prior is " << prior_cv << endl;
+     
+    float scale = EstimateScale(d, n, R, t);
 	auto end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>( end - start ).count();
-    cout << "duration of scale " << duration << endl;
+    // cout << "duration of scale " << duration << endl;
 
-    cout << "scale is " << scale << endl;
-
+    // cout << "scale is " << scale << endl;
+    cout << "normal is " << n << endl;
+    
+    float angle = cosine_angle(prior_cv, n);
+    cout << "calculated angle: " << angle * 180/M_PI << endl;
+    if (angle > NORMAL_ANGLE_THRESHOLD) {
+        cout << "POOR INITIALIZATION..... " << endl;
+        exit(1);
+    }
+    
 
     if(scale<0 || pKFcur->TrackedMapPoints(1)<100)
     // if(medianDepth<0 || pKFcur->TrackedMapPoints(1)<100)
@@ -1051,7 +1091,6 @@ void Tracking::CreateInitialMapMonocular()
     // Scale initial baseline
     cv::Mat Tc2w = pKFcur->GetPose();
     // Tc2w.col(3).rowRange(0,3) = Tc2w.col(3).rowRange(0,3)*invMedianDepth;
-    cout << "norm is " << cv::norm(Tc2w.col(3).rowRange(0,3)) << endl;
     Tc2w.col(3).rowRange(0,3) = Tc2w.col(3).rowRange(0,3)*scale;
     pKFcur->SetPose(Tc2w);
 
@@ -1512,6 +1551,8 @@ bool compareKeyFrameId(KeyFrame* kf1, KeyFrame* kf2)
     return (kf1->mnFrameId <  kf2->mnFrameId);
 }
 
+
+
 // Ground Plane based Absolute Scale Estimation for Monocular Visual Odometry
 // This rescaling function is implementing the scale correction proposed by this paper
 // https://arxiv.org/pdf/1903.00912.pdf
@@ -1551,17 +1592,37 @@ void Tracking::Rescale()
     // First, we get the estimated scale
     float d;
     cv::Mat n;
-    float scale = EstimateScale(d,n);
+    cv::Mat V = mVelocity.clone();
+    cv::Mat VR = V.rowRange(0,3).colRange(0,3);
+    cv::Mat Vt = V.rowRange(0,3).col(3);
+    float scale = EstimateScale(d,n, VR, Vt);
+    //float scale = EstimateScale(d,n);
+    cout << "Vt:" << endl << Vt << endl; 
     cout << "Scale, previous scale, angle: " << scale << " " << oldScale << " " << acos(n.dot(prevNormal)/(norm(n)*norm(prevNormal)))* 180 / M_PI << endl;
     cout << "Current NOrmal: " << n << endl;
 
-
+    const float pitch_rot = 4. * M_PI/180.;
+    Eigen::Vector4f v(0, 1, 0, 1);
+    Eigen::Matrix4f eigRot = Eigen::Matrix4f::Identity();
+    eigRot(1, 1) = cos(pitch_rot);
+    eigRot(1, 2) = -sin(pitch_rot);
+    eigRot(2, 1) = sin(pitch_rot);
+    eigRot(2, 2) = cos(pitch_rot);
+    Eigen::Vector4f normal_prior = eigRot * v;
+    cv::Mat prior_cv(3, 1, CV_32F);
+    prior_cv.at<float>(0, 0) = normal_prior(0);
+    prior_cv.at<float>(1, 0) = normal_prior(1);
+    prior_cv.at<float>(2, 0) = normal_prior(2);
 
     //cout << "current frame pose: \n" << mCurrentFrame.mTcw<< endl;
+    float angle = cosine_angle(prior_cv, n);
+    cout << "new normal angle is " << angle * 180 / M_PI << endl;
+
 
     // If the angle between normal from estimation and the last normal is greater that 5 degrees, do not rescale
-    //  if(acos(n.dot(prevNormal)/(norm(n)*norm(prevNormal))) < NORMAL_ANGLE_THRESHOLD && mpLastKeyFrame->mnFrameId >= 300)
-     if(acos(n.dot(prevNormal)/(norm(n)*norm(prevNormal))) < NORMAL_ANGLE_THRESHOLD)
+     if(angle < NORMAL_ANGLE_THRESHOLD)
+    //  if(acos(n.dot(prevNormal)/(norm(n)*norm(prevNormal))) < NORMAL_ANGLE_THRESHOLD)
+    //  if(acos(n.dot(prevNormal)/(norm(n)*norm(prevNormal))) < NORMAL_ANGLE_THRESHOLD && fabs(oldScale/scale - 1) > 0.075)
     {
         // Since the scale is good, we accept the scale and perform the rescaling
         cout << "Scale accepted" << endl;
@@ -1612,6 +1673,10 @@ void Tracking::Rescale()
         // This is for the KeyFrames
         KeyFrame* firstFrame = sortedLocalKeyFrames[0];
         cv::Mat Twf = firstFrame->GetPoseInverse();
+        cv::Mat Tfw = firstFrame->GetPose();
+        cv::Mat Rfw = Tfw.rowRange(0, 3).colRange(0, 3);
+        cv::Mat tfw = Tfw.rowRange(0, 3).col(3);
+        g2o::Sim3 g2oSfw(Converter::toMatrix3d(Rfw), Converter::toVector3d(tfw), 1.);         
 
         // for(int i = 0 ; i < (int)mvpLocalKeyFrames.size() ; i++)
         for(int i = 1 ; i < sortedLocalKeyFrames.size() ; i++)
@@ -1627,8 +1692,19 @@ void Tracking::Rescale()
             //comments: ok now i got the scale from Tic
             cv::Mat Tiw = sortedLocalKeyFrames[i]->GetPose();
             cv::Mat Tif = Tiw * Twf; //Tiw * Twc
-            Tif.rowRange(0, 3).col(3) = Tif.rowRange(0,3).col(3) * scale  / oldScale;
-            cv::Mat TiwCorrected = Tif * firstFrame->GetPose();
+            cv::Mat Rif = Tif.rowRange(0, 3).colRange(0, 3);
+            cv::Mat tif = Tif.rowRange(0, 3).col(3);
+            g2o::Sim3 g2oSif(Converter::toMatrix3d(Rif), Converter::toVector3d(tif), 1/scale);
+
+            g2o::Sim3 g2oSiwCorrected = g2oSif * g2oSfw;
+
+            //Tif.rowRange(0, 3).col(3) = Tif.rowRange(0,3).col(3) * scale;//  / oldScale;
+            //cv::Mat TiwCorrected = Tif * firstFrame->GetPose();
+            Eigen::Matrix3d eigR = g2oSiwCorrected.rotation().toRotationMatrix();
+            Eigen::Vector3d eigt = g2oSiwCorrected.translation();
+            double s = g2oSiwCorrected.scale();
+            eigt *= 1./s;
+            cv::Mat TiwCorrected = Converter::toCvSE3(eigR, eigt);
             sortedLocalKeyFrames[i]->SetPose(TiwCorrected);
 
             cv::Mat t = sortedLocalKeyFrames[i]->GetCameraCenter();
@@ -1641,12 +1717,13 @@ void Tracking::Rescale()
             //end added by CY
 
             cv::Mat Riw = Tiw.rowRange(0, 3).colRange(0, 3);
-            cv::Mat RiwCorrected = TiwCorrected.rowRange(0, 3).colRange(0, 3);
+            // cv::Mat RiwCorrected = TiwCorrected.rowRange(0, 3).colRange(0, 3);
             cv::Mat tiw = Tiw.rowRange(0, 3).col(3);
-            cv::Mat tiwCorrected = TiwCorrected.rowRange(0, 3).col(3);
+            // cv::Mat tiwCorrected = TiwCorrected.rowRange(0, 3).col(3);
             g2o::Sim3 g2oiw(Converter::toMatrix3d(Riw), Converter::toVector3d(tiw), 1.);
-            g2o::Sim3 g2oiwCorrected(Converter::toMatrix3d(RiwCorrected), Converter::toVector3d(tiwCorrected), scale/oldScale);
-            g2o::Sim3 g2owiCorrected = g2oiwCorrected.inverse();
+            // g2o::Sim3 g2oiwCorrected(Converter::toMatrix3d(RiwCorrected), Converter::toVector3d(tiwCorrected), 1./scale/* /oldScale */);
+            // g2o::Sim3 g2owiCorrected = g2oiwCorrected.inverse();
+            g2o::Sim3 g2oSwiCorrected = g2oSiwCorrected.inverse();
 
             vector<MapPoint*> mapPointsMatches =sortedLocalKeyFrames[i]->GetMapPointMatches();
             for(size_t indexMP = 0; indexMP < mapPointsMatches.size(); indexMP++)
@@ -1659,7 +1736,7 @@ void Tracking::Rescale()
 
                 cv::Mat P3Dw = mapPointi->GetWorldPos();
                 Eigen::Matrix<double, 3, 1> eigP3Dw = Converter::toVector3d(P3Dw);
-                Eigen::Matrix<double, 3, 1> eigCorrectedP3Dw = g2owiCorrected.map(g2oiw.map(eigP3Dw));
+                Eigen::Matrix<double, 3, 1> eigCorrectedP3Dw = g2oSwiCorrected.map(g2oiw.map(eigP3Dw));
                 cv::Mat correctedMapPoint = Converter::toCvMat(eigCorrectedP3Dw);
                 mapPointi->SetWorldPos(correctedMapPoint);
                 mapPointi->mnCorrectedByKF = mpLastKeyFrame->mnId;
@@ -1669,7 +1746,7 @@ void Tracking::Rescale()
         }
 
         cv::Mat Tcf = mpLastKeyFrame->GetPose() * Twf;
-        Tcf.rowRange(0, 3).col(3) = Tcf.rowRange(0,3).col(3) * scale  / oldScale;
+        Tcf.rowRange(0, 3).col(3) = Tcf.rowRange(0,3).col(3) * scale;//  / oldScale;
         cv::Mat TcwCorrected = Tcf * firstFrame->GetPose();
         mpLastKeyFrame->SetPose(TcwCorrected);
         mCurrentFrame.SetPose(TcwCorrected);
@@ -1694,7 +1771,7 @@ void Tracking::Rescale()
         //added by CY
         cv::Mat bv = mVelocity.clone();
         // float oldScale = cv::norm(mVelocity.rowRange(0,3).col(3));
-        mVelocity.col(3).rowRange(0,3) = mVelocity.col(3).rowRange(0,3) * scale / oldScale;
+        mVelocity.col(3).rowRange(0,3) = mVelocity.col(3).rowRange(0,3) * scale;// / oldScale;
         // cout << "scale: " << oldScale << " " << scale << endl;
         // cout << "Before velocity " << bv << endl << mVelocity << endl;
 
@@ -1746,7 +1823,7 @@ void Tracking::Rescale()
     
     mpMapDrawer->DrawMapPoints();
 
-    bNeedRescale = false;
+    // bNeedRescale = false;
     // bool test = false;
     // Optimizer::LocalBundleAdjustment(mpLastKeyFrame, &test, mpMap);
 

@@ -231,7 +231,7 @@ protected:
     bool solveH(vector<Point2f> &srcPoint, vector<Point2f> &dstPoint, cv::Mat &H, Mat &mask);
     void solveRT(vector<cv::Point2f> &srcPoints, vector<cv::Point2f> &dstPoints, Mat &R, Mat &t, Mat &mask);
     void InitialSolver(cv::Mat R, cv::Mat t, cv::Mat H, float &d0, cv::Mat &n);
-    float EstimateScale(float &d, cv::Mat &n);
+    float EstimateScale(float &d, cv::Mat &n, cv::Mat refR = cv::Mat(), cv::Mat refT = cv::Mat());
     void Rescale();
 };
 
