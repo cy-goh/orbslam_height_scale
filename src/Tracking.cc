@@ -51,7 +51,7 @@ namespace ORB_SLAM2
 Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer, MapDrawer *pMapDrawer, Map *pMap, KeyFrameDatabase* pKFDB, const string &strSettingPath, const int sensor):
     mState(NO_IMAGES_YET), mSensor(sensor), mbOnlyTracking(false), mbVO(false), mpORBVocabulary(pVoc),
     mpKeyFrameDB(pKFDB), mpInitializer(static_cast<Initializer*>(NULL)), mpSystem(pSys), mpViewer(NULL),
-    mpFrameDrawer(pFrameDrawer), mpMapDrawer(pMapDrawer), mpMap(pMap), mnLastRelocFrameId(0)
+    mpFrameDrawer(pFrameDrawer), mpMapDrawer(pMapDrawer), mpMap(pMap), mnLastRelocFrameId(0), mTxFile("tx.txt")
 {
     // Load camera parameters from settings file
 
@@ -528,7 +528,7 @@ float Tracking::EstimateScale(float &d, cv::Mat &n, cv::Mat refR, cv::Mat refT)
     solveRT(srcPoint, dstPoint, R, t, mask);
  	auto end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>( end - start ).count();
-    cout << "duration of solvert " << duration << endl;
+    // cout << "duration of solvert " << duration << endl;
     filterSrcAndDstPointsBasedOnMask(srcPoint, dstPoint, mask);
 //    cout << "Number of inlier after solveRT: " << inlierIndex.size() << endl;
 
@@ -1552,6 +1552,10 @@ bool compareKeyFrameId(KeyFrame* kf1, KeyFrame* kf2)
 }
 
 
+Tracking::~Tracking(){
+    mTxFile.close();
+}
+
 
 // Ground Plane based Absolute Scale Estimation for Monocular Visual Odometry
 // This rescaling function is implementing the scale correction proposed by this paper
@@ -1597,7 +1601,7 @@ void Tracking::Rescale()
     cv::Mat Vt = V.rowRange(0,3).col(3);
     float scale = EstimateScale(d,n, VR, Vt);
     //float scale = EstimateScale(d,n);
-    cout << "Vt:" << endl << Vt << endl; 
+    // cout << "Vt:" << endl << Vt << endl; 
     cout << "Scale, previous scale, angle: " << scale << " " << oldScale << " " << acos(n.dot(prevNormal)/(norm(n)*norm(prevNormal)))* 180 / M_PI << endl;
     cout << "Current NOrmal: " << n << endl;
 
@@ -1705,6 +1709,7 @@ void Tracking::Rescale()
             double s = g2oSiwCorrected.scale();
             eigt *= 1./s;
             cv::Mat TiwCorrected = Converter::toCvSE3(eigR, eigt);
+            // cout << "BEFORE:" << Tiw << endl << "AFTER:" << TiwCorrected << endl;
             sortedLocalKeyFrames[i]->SetPose(TiwCorrected);
 
             cv::Mat t = sortedLocalKeyFrames[i]->GetCameraCenter();
@@ -1755,7 +1760,8 @@ void Tracking::Rescale()
 
 
 //        cout << endl;
-        beforeFile.close(); afterFile.close();
+        
+        beforeFile.close(); afterFile.close(); 
         // exit(1);
 
         //commented by cy: I dont think this is needed
@@ -1772,6 +1778,11 @@ void Tracking::Rescale()
         cv::Mat bv = mVelocity.clone();
         // float oldScale = cv::norm(mVelocity.rowRange(0,3).col(3));
         mVelocity.col(3).rowRange(0,3) = mVelocity.col(3).rowRange(0,3) * scale;// / oldScale;
+
+        float cal_tx = cv::norm(mVelocity.col(3).rowRange(0, 3) );
+        mTxFile << mCurrentFrame.mnId << "," << cal_tx << endl;
+
+
         // cout << "scale: " << oldScale << " " << scale << endl;
         // cout << "Before velocity " << bv << endl << mVelocity << endl;
 
@@ -1822,6 +1833,7 @@ void Tracking::Rescale()
     mpLocalMapper->Release();
     
     mpMapDrawer->DrawMapPoints();
+
 
     // bNeedRescale = false;
     // bool test = false;

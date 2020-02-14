@@ -57,6 +57,9 @@ class Tracking
 public:
     Tracking(System* pSys, ORBVocabulary* pVoc, FrameDrawer* pFrameDrawer, MapDrawer* pMapDrawer, Map* pMap,
              KeyFrameDatabase* pKFDB, const string &strSettingPath, const int sensor);
+    
+    //TODO: remove this when not needed
+    ~Tracking();
 
     // Preprocess the input and call Track(). Extract features and performs stereo matching.
     cv::Mat GrabImageStereo(const cv::Mat &imRectLeft,const cv::Mat &imRectRight, const double &timestamp);
@@ -120,6 +123,9 @@ public:
     vector<float> scaleHistory;
 
 protected:
+
+    //TODO: remove this whenm not needed
+    std::ofstream mTxFile;
 
     // Main tracking function. It is independent of the input sensor.
     void Track();
@@ -225,7 +231,7 @@ protected:
     cv::Mat prevNormal;
     float oldScale;
     const double NORMAL_ANGLE_THRESHOLD = 5.0 * M_PI / 180;
-    const double SCALE_UPDATE_PERIOD = 3.0; // should be in seconds
+    const double SCALE_UPDATE_PERIOD = 2.0; // should be in seconds
 
     void filterSrcAndDstPointsBasedOnMask(vector<cv::Point2f> &srcPoints, vector<cv::Point2f> &dstPoints, cv::Mat mask);
     bool solveH(vector<Point2f> &srcPoint, vector<Point2f> &dstPoint, cv::Mat &H, Mat &mask);
