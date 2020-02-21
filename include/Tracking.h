@@ -238,6 +238,10 @@ protected:
     float EstimateScale(float &d, cv::Mat &n, cv::Mat refR = cv::Mat(), cv::Mat refT = cv::Mat());
     void Rescale();
 
+    vector<int> GetGroundPts(vector<Point2f> &srcPoint, vector<Point2f> &dstPoint);
+    vector<int> GetPointsByROI(vector<Point2f> &srcPoint, vector<Point2f> &dstPoint);
+    vector<int> GetPointsByTriangulation(vector<Point2f> &srcPoint, vector<Point2f> &dstPoin);
+
     inline float CosineAngle(cv::Mat &n1, cv::Mat &n2)
     {
         return acos(n1.dot(n2) / (norm(n1) * norm(n2)));

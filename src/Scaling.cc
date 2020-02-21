@@ -9,6 +9,37 @@ bool CompareKeyFrameId(KeyFrame *kf1, KeyFrame *kf2)
     return (kf1->mnFrameId < kf2->mnFrameId);
 }
 
+vector<int> Tracking::GetGroundPts(vector<Point2f> &srcPoint, vector<Point2f> &dstPoint)
+{
+    return GetPointsByROI(srcPoint, dstPoint);
+}
+
+vector<int> Tracking::GetPointsByROI(vector<Point2f> &srcPoint, vector<Point2f> &dstPoint)
+{
+    // This ROI defines the ground plane in front of the vehicle. The paper suggests that a basic road detector is used
+    // to pre-determine the ROI needed, but for now, we just use the ROI defined in the author's code.
+    const vector<Point2f> ROI = {Point2f(500, 230), Point2f(700, 230), Point2f(800, 380), Point2f(400, 380)};
+    vector<int> results;
+
+    for (int i = 0; i < srcPoint.size(); ++i)
+    {
+        // ISSUES: We only check if the source point is in ROI or not
+        //         upon investigation, it is found that some of the point is match to the cloud etc.
+        //         this might or might not affect findHomography badly
+        // If srcPoint[i] is in / on the polygon defined in ROI, push both src and dst Point.
+        if (cv::pointPolygonTest(ROI, srcPoint[i], false) >= 0 && cv::pointPolygonTest(ROI, dstPoint[i], false) >= 0)
+            results.push_back(i);
+    }
+
+    return results;
+}
+
+vector<int> Tracking::GetPointsByTriangulation(vector<Point2f> &srcPoint, vector<Point2f> &dstPoint)
+{
+    vector<int> results;
+    return results;
+}
+
 void Tracking::FilterSrcAndDstPointsBasedOnMask(vector<cv::Point2f> &srcPoints, vector<cv::Point2f> &dstPoints, cv::Mat mask)
 {
     int idx = 0; // idx will be the first index in which the mask = 0, also corresponds to the number of points with mask = 1
@@ -26,23 +57,11 @@ void Tracking::FilterSrcAndDstPointsBasedOnMask(vector<cv::Point2f> &srcPoints, 
 
 bool Tracking::SolveH(vector<Point2f> &srcPoint, vector<Point2f> &dstPoint, cv::Mat &H, Mat &mask)
 {
-    // This ROI defines the ground plane in front of the vehicle. The paper suggests that a basic road detector is used
-    // to pre-determine the ROI needed, but for now, we just use the ROI defined in the author's code.
-    vector<Point2f> ROI = {Point2f(500, 230), Point2f(700, 230), Point2f(800, 380), Point2f(400, 380)};
-
     vector<Point2f> srcPointROI, dstPointROI;
-
-    for (int i = 0; i < (int)srcPoint.size(); ++i)
+    for (auto i : GetGroundPts(srcPoint, dstPoint))
     {
-        // ISSUES: We only check if the source point is in ROI or not
-        //         upon investigation, it is found that some of the point is match to the cloud etc.
-        //         this might or might not affect findHomography badly
-        // If srcPoint[i] is in / on the polygon defined in ROI, push both src and dst Point.
-        if (cv::pointPolygonTest(ROI, srcPoint[i], false) >= 0)
-        {
-            srcPointROI.push_back(srcPoint[i]);
-            dstPointROI.push_back(dstPoint[i]);
-        }
+        srcPointROI.push_back(srcPoint[i]);
+        dstPointROI.push_back(dstPoint[i]);
     }
 
     // This commented code shows the keypoint after the last Frame's keypoint is cropped at ROI
@@ -111,7 +130,7 @@ void Tracking::SolveRT(vector<cv::Point2f> &srcPoints, vector<cv::Point2f> &dstP
     //        F_dis.at<double>(i) = cv::sqrt(dis.at<double>(0,0) * dis.at<double>(0,0) /den);
     //    }
     //    mask = F_dis < 0.5;
-}    
+}
 
 void Tracking::InitialSolver(cv::Mat R, cv::Mat t, cv::Mat H, float &d0, cv::Mat &n)
 {
@@ -198,10 +217,10 @@ void Tracking::InitialSolver(cv::Mat R, cv::Mat t, cv::Mat H, float &d0, cv::Mat
          X(2, 0),
          X(3, 0));
     n = n / cv::norm(n);
-    cout << "d0 is" << d0 << endl;
-    cout << "R is " << R << endl;
-    cout << "t is " << t << endl;
-    cout << "X is " << X << endl;
+    // cout << "d0 is" << d0 << endl;
+    // cout << "R is " << R << endl;
+    // cout << "t is " << t << endl;
+    // cout << "X is " << X << endl;
 
     //    ==================================================================================================================
 
