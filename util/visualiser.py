@@ -12,7 +12,8 @@ seq = "06"
 # seq = "07"
 #orb_lcse_filename = "result/KeyFrameTrajectory-LCSE-" + seq + ".txt"
 orb_lcse_filename = "KeyFrameTrajectory-" + seq + ".txt"
-ground_truth_filename = "/ext/data/kitti/odometry/dataset/poses/"+ seq + ".txt"
+ground_truth_filename = "/home/cy/Documents/data/kitti/data_odometry_poses/"+ seq + ".txt"
+#ground_truth_filename = "/ext/data/kitti/odometry/dataset/poses/"+ seq + ".txt"
 
 f, ax = plt.subplots()
 

@@ -566,7 +566,7 @@ bool LocalMapping::Stop()
     if(mbStopRequested && !mbNotStop)
     {
         mbStopped = true;
-        cout << "Local Mapping STOP" << endl;
+        // cout << "Local Mapping STOP" << endl;
         return true;
     }
 
@@ -597,7 +597,7 @@ void LocalMapping::Release()
         delete *lit;
     mlNewKeyFrames.clear();
 
-    cout << "Local Mapping RELEASE" << endl;
+    // cout << "Local Mapping RELEASE" << endl;
 }
 
 bool LocalMapping::AcceptKeyFrames()

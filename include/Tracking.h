@@ -225,14 +225,16 @@ protected:
     /********* AVT added functions and variables **********/
     const double NORMAL_ANGLE_THRESHOLD = 3.0 * M_PI / 180;
     const double SCALE_UPDATE_PERIOD = 2.0; // should be in seconds
-    
+    const static int WINDOW_SIZE = 6;
+
     double mTimeStampLastUpdate;
     bool bNeedRescale;
     cv::Mat prevNormal, mPriorNormal;
     float oldScale;
+    vector<float> window;
 
     void FilterSrcAndDstPointsBasedOnMask(vector<cv::Point2f> &srcPoints, vector<cv::Point2f> &dstPoints, cv::Mat mask);
-    bool SolveH(vector<Point2f> &srcPoint, vector<Point2f> &dstPoint, cv::Mat &H, Mat &mask);
+    bool SolveH(vector<Point2f> &srcPoint, vector<Point2f> &dstPoint, cv::Mat &H, Mat &mask, cv::Mat &R, cv::Mat &t);
     void SolveRT(vector<cv::Point2f> &srcPoints, vector<cv::Point2f> &dstPoints, Mat &R, Mat &t, Mat &mask);
     void InitialSolver(cv::Mat R, cv::Mat t, cv::Mat H, float &d0, cv::Mat &n);
     float EstimateScale(float &d, cv::Mat &n, cv::Mat refR = cv::Mat(), cv::Mat refT = cv::Mat());
@@ -240,7 +242,7 @@ protected:
 
     vector<int> GetGroundPts(vector<Point2f> &srcPoint, vector<Point2f> &dstPoint);
     vector<int> GetPointsByROI(vector<Point2f> &srcPoint, vector<Point2f> &dstPoint);
-    vector<int> GetPointsByTriangulation(vector<Point2f> &srcPoint, vector<Point2f> &dstPoin);
+    vector<int> GetPointsByTriangulation(vector<Point2f> &srcPoint, vector<Point2f> &dstPoint, const cv::Mat R, const cv::Mat t);
 
     inline float CosineAngle(cv::Mat &n1, cv::Mat &n2)
     {

@@ -465,10 +465,12 @@ void Tracking::Track()
             }
             mlpTemporalPoints.clear();
 
+
             //FIXME: turn this on/off
             // [SCALE CORRECTION] I (tried to) rescale the map every given interval
             // Comment this section if you don't want to have scale correction
-            if (mCurrentFrame.mTimeStamp - mTimeStampLastUpdate > SCALE_UPDATE_PERIOD)
+            // if (mCurrentFrame.mTimeStamp - mTimeStampLastUpdate > SCALE_UPDATE_PERIOD)
+            if (true)
             {
                 // This signals the need of rescaling .
                 // When the next key frame has been addeed, if this variable is true, then rescaling will be done.
@@ -478,7 +480,7 @@ void Tracking::Track()
                 //    cv::Mat n;
                 //    float scale = EstimateScale(d,n);
                 //    scaleHistory.push_back(scale);
-                mTimeStampLastUpdate = mCurrentFrame.mTimeStamp;
+                // mTimeStampLastUpdate = mCurrentFrame.mTimeStamp;
             }
 
             // Check if we need to insert a new keyframe
