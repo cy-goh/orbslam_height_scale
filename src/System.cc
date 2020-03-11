@@ -102,7 +102,7 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
         mpTracker->SetViewer(mpViewer);
     }
 
-    //TODO: remove this
+    //TODO: I am turning of loop closing now.
     mpLoopCloser->RequestFinish();
     while(!mpLoopCloser->isFinished())
     {
@@ -394,6 +394,8 @@ void System::SaveKeyFrameTrajectoryTUM(const string &filename)
     vector<KeyFrame*> vpKFs = mpMap->GetAllKeyFrames();
     sort(vpKFs.begin(),vpKFs.end(),KeyFrame::lId);
 
+    cout << "Total no. of Keyframes: " << vpKFs.size() << endl;
+
     // Transform all keyframes so that the first keyframe is at the origin.
     // After a loop closure the first keyframe might not be at the origin.
     //cv::Mat Two = vpKFs[0]->GetPoseInverse();
@@ -409,7 +411,10 @@ void System::SaveKeyFrameTrajectoryTUM(const string &filename)
        // pKF->SetPose(pKF->GetPose()*Two);
 
         if(pKF->isBad())
+        {
+            cout << "Keyframe " << pKF->mnId << " is bad" << endl; 
             continue;
+        }
 
         cv::Mat R = pKF->GetRotation().t();
         vector<float> q = Converter::toQuaternion(R);

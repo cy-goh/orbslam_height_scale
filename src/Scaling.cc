@@ -2,16 +2,17 @@
 #include "Converter.h"
 #include "Utils.h"
 #include <assert.h>
+#include <numeric>
 
 #include <opencv2/imgproc/imgproc.hpp>
 
 namespace ORB_SLAM2
 {
 
-bool CompareKeyFrameId(KeyFrame *kf1, KeyFrame *kf2)
-{
-    return (kf1->mnFrameId < kf2->mnFrameId);
-}
+// bool CompareKeyFrameId(KeyFrame *kf1, KeyFrame *kf2)
+// {
+//     return (kf1->mnFrameId < kf2->mnFrameId);
+// }
 
 vector<int> Tracking::GetGroundPts(vector<Point2f> &srcPoint, vector<Point2f> &dstPoint)
 {
@@ -41,6 +42,8 @@ vector<int> Tracking::GetPointsByTriangulation(vector<Point2f> &srcPoint, vector
     //do triangulation to get 3D points
     cv::Mat points3D;
 
+    vector<int> results, triangleIndices;
+
     //P0
     cv::Mat origin = cv::Mat::zeros(3, 4, CV_32F);
     cv::Mat I = cv::Mat::eye(3, 3, CV_32F);
@@ -53,14 +56,21 @@ vector<int> Tracking::GetPointsByTriangulation(vector<Point2f> &srcPoint, vector
 
     cv::Mat srcProj = mK * origin;
     cv::Mat dstProj = mK * ext;
+    if (srcPoint.empty())
+        return results;
+
     cv::triangulatePoints(srcProj, dstProj, srcPoint, dstPoint, points3D);
 
-    vector<int> results, triangleIndices;
     vector<Point2f> resultsLoc;
     cv::Rect rect(0, 0, mCurrentFrame.im.cols, mCurrentFrame.im.rows);
     Subdiv2DIndex delaunay(rect);
 
     vector<Point2f> &refPoints = srcPoint;
+
+    if (refPoints.size() < 3)
+    {
+        return results;
+    }
 
     delaunay.insert(refPoints);
     delaunay.getTrianglesIndices(triangleIndices);
@@ -162,12 +172,16 @@ void Tracking::FilterSrcAndDstPointsBasedOnMask(vector<cv::Point2f> &srcPoints, 
 bool Tracking::SolveH(vector<Point2f> &srcPoint, vector<Point2f> &dstPoint, cv::Mat &H, Mat &mask, cv::Mat &R, cv::Mat &t)
 {
     /////////// experiment /////////////////
-    GetPointsByTriangulation(srcPoint, dstPoint, R, t);
+    vector<int> pts1 = GetPointsByTriangulation(srcPoint, dstPoint, R, t);
+    vector<int> pts2 = GetGroundPts(srcPoint, dstPoint);
+    vector<int> pts12;
 
-    ////////// end experiment //////////////
+    pts12.reserve( pts1.size() + pts2.size() ); // preallocate memory
+    pts12.insert( pts12.end(), pts1.begin(), pts1.end() );
+    pts12.insert( pts12.end(), pts2.begin(), pts2.end() );
 
     vector<Point2f> srcPointROI, dstPointROI;
-    for (auto i : GetGroundPts(srcPoint, dstPoint))
+    for (auto i : pts12)
     {
         srcPointROI.push_back(srcPoint[i]);
         dstPointROI.push_back(dstPoint[i]);
@@ -382,10 +396,7 @@ float Tracking::EstimateScale(float &d, cv::Mat &n, cv::Mat refR, cv::Mat refT)
     vector<cv::DMatch> good_matches;
     for (size_t i = 0; i < nn_matches.size(); i++)
     {
-        DMatch first = nn_matches[i][0];
-        float dist1 = nn_matches[i][0].distance;
-        float dist2 = nn_matches[i][1].distance;
-        if (dist1 < 0.85 * dist2)
+        if (nn_matches[i][0].distance < 0.85 * nn_matches[i][1].distance)
         {
             good_matches.push_back(nn_matches[i][0]);
         }
@@ -457,7 +468,7 @@ float Tracking::EstimateScale(float &d, cv::Mat &n, cv::Mat refR, cv::Mat refT)
 // Ground Plane based Absolute Scale Estimation for Monocular Visual Odometry
 // This rescaling function is implementing the scale correction proposed by this paper
 // https://arxiv.org/pdf/1903.00912.pdf
-void Tracking::Rescale()
+float Tracking::ManageScale()
 {
     // I think that if you want to modify the KeyFrame and MapPoints, still need to make sure that no other thread is using.
     // I don't know how to turned off the GBA in Tracking thread, so I just turned off the loop closing thread
@@ -466,26 +477,53 @@ void Tracking::Rescale()
     // Send a stop signal to Local Mapping
     // Avoid new keyframes are inserted while correcting the loop
 
+    static int consecutive = 0;
+
     // First, we get the estimated scale
     float d;
     cv::Mat n;
-    cv::Mat V = mVelocity.clone();
-    cv::Mat VR = V.rowRange(0, 3).colRange(0, 3);
-    cv::Mat Vt = V.rowRange(0, 3).col(3);
+    cv::Mat VR = mVelocity.rowRange(0, 3).colRange(0, 3);
+    cv::Mat Vt = mVelocity.rowRange(0, 3).col(3);
     float scale = EstimateScale(d, n, VR, Vt);
 
     //cout << "current frame pose: \n" << mCurrentFrame.mTcw<< endl;
-    float angle = CosineAngle(mPriorNormal, n);
+    float angle = CosineAngle(mPriorNormal, n) * 180. / M_PI;
     // cout << "new normal angle is " << angle * 180 / M_PI << endl;
 
     float scaledTx = cv::norm(mVelocity.col(3).rowRange(0, 3) * scale);
     mTxFile << mCurrentFrame.mnId << "," << scaledTx << endl;
 
     // If the angle between normal from estimation and the last normal is greater that 5 degrees, do not rescale
-    if (angle < NORMAL_ANGLE_THRESHOLD)
+    if (angle < 7.5)
     //  if(acos(n.dot(prevNormal)/(norm(n)*norm(prevNormal))) < NORMAL_ANGLE_THRESHOLD)
     //  if(acos(n.dot(prevNormal)/(norm(n)*norm(prevNormal))) < NORMAL_ANGLE_THRESHOLD && fabs(oldScale/scale - 1) > 0.075)
     {
+        consecutive++;  
+
+        if (mWindow.size() >= mWeights.size()) 
+            mWindow.erase(mWindow.begin()); //rm first element
+
+        mWindow.push_back(scale);
+        cout << "pushing scale:" << scale * cv::norm(Vt) << endl;
+
+        if (mWindow.size() != mWeights.size())
+        {
+            return 1.;
+        }
+
+        float wSum = std::accumulate(mWeights.begin(), mWeights.end(), 0.);
+        float wAvg = 0.;
+        for (int i = 0; i < mWindow.size(); i++)
+        {
+            wAvg += mWindow[i] * mWeights[i];
+        }
+
+        wAvg /= wSum;
+
+        // if (consecutive >= 2)
+            return wAvg;
+        // else
+            // return 1.;
         // Since the scale is good, we accept the scale and perform the rescaling
         // cout << "Scale accepted" << endl;
         //unique_lock<mutex> lock(mpMap->mMutexMapUpdate);
@@ -522,196 +560,12 @@ void Tracking::Rescale()
 
         if (mCurrentFrame.mTimeStamp - mTimeStampLastUpdate > SCALE_UPDATE_PERIOD)
         {
-            cout << "===================\nRescaling..." << endl;
-
-            mpLocalMapper->RequestStop();
-
-            // TODO: It is assumed that we turned off the Loop Closing Module
-            //       If you need that module, need to make sure GBA is stopped before continuing
-
-            if (mpLoopClosing->isRunningGBA())
-            {
-                mpLoopClosing->StopGBA();
-            }
-
-            // Wait until Local Mapping has effectively stopped
-            while (!mpLocalMapper->isStopped())
-            {
-                cout << "Waiting..." << endl;
-                usleep(1000);
-            }   
-
-            // Ensure current keyframe is updated
-            mpLastKeyFrame->UpdateConnections();
-
-            std::vector<KeyFrame *> sortedLocalKeyFrames(mvpLocalKeyFrames);
-            sort(sortedLocalKeyFrames.begin(), sortedLocalKeyFrames.end(), CompareKeyFrameId);
-
-            ofstream beforeFile("before.txt"), afterFile("after.txt");
-            std::vector<KeyFrame *> mykfs = mpMap->GetAllKeyFrames();
-            for (int i = 0; i < mykfs.size(); i++)
-            {
-                KeyFrame *pKF = mykfs[i];
-                if (pKF->isBad())
-                    continue;
-                cv::Mat t = pKF->GetCameraCenter();
-                beforeFile << t.at<float>(0) << "," << t.at<float>(1) << "," << t.at<float>(2) << endl;
-            }
-
-            // This is for the KeyFrames
-            KeyFrame *firstFrame = sortedLocalKeyFrames[0];
-            cv::Mat Twf = firstFrame->GetPoseInverse();
-            cv::Mat Tfw = firstFrame->GetPose();
-            cv::Mat Rfw = Tfw.rowRange(0, 3).colRange(0, 3);
-            cv::Mat tfw = Tfw.rowRange(0, 3).col(3);
-            g2o::Sim3 g2oSfw(Converter::toMatrix3d(Rfw), Converter::toVector3d(tfw), 1.);
-
-            // for(int i = 0 ; i < (int)mvpLocalKeyFrames.size() ; i++)
-            for (int i = 1; i < sortedLocalKeyFrames.size(); i++)
-            {
-                //            cout << "(" << mvpLocalKeyFrames[i]->mnId << ", " << mvpLocalKeyFrames[i]->mnFrameId << ") "; // (KeyFrameID, FrameID)
-                /*             cv::Mat pose = mpReferenceKF->GetPose() * mvpLocalKeyFrames[i]->GetPoseInverse();
-            pose.col(3).rowRange(0,3) = pose.col(3).rowRange(0,3) * scale / oldScale;
-            pose = mpReferenceKF->GetPoseInverse() * pose.clone();
-            mvpLocalKeyFrames[i]->SetPose(pose.inv()); */
-                //            mvpLocalKeyFrames[i]->UpdateConnections();
-
-                //added by CY
-                //comments: ok now i got the scale from Tic
-                cv::Mat Tiw = sortedLocalKeyFrames[i]->GetPose();
-                cv::Mat Tif = Tiw * Twf; //Tiw * Twc
-                cv::Mat Rif = Tif.rowRange(0, 3).colRange(0, 3);
-                cv::Mat tif = Tif.rowRange(0, 3).col(3);
-                g2o::Sim3 g2oSif(Converter::toMatrix3d(Rif), Converter::toVector3d(tif), 1 / scale);
-
-                g2o::Sim3 g2oSiwCorrected = g2oSif * g2oSfw;
-
-                //Tif.rowRange(0, 3).col(3) = Tif.rowRange(0,3).col(3) * scale;//  / oldScale;
-                //cv::Mat TiwCorrected = Tif * firstFrame->GetPose();
-                Eigen::Matrix3d eigR = g2oSiwCorrected.rotation().toRotationMatrix();
-                Eigen::Vector3d eigt = g2oSiwCorrected.translation();
-                double s = g2oSiwCorrected.scale();
-                eigt *= 1. / s;
-                cv::Mat TiwCorrected = Converter::toCvSE3(eigR, eigt);
-                // cout << "BEFORE:" << Tiw << endl << "AFTER:" << TiwCorrected << endl;
-                sortedLocalKeyFrames[i]->SetPose(TiwCorrected);
-
-                cv::Mat t = sortedLocalKeyFrames[i]->GetCameraCenter();
-                afterFile << t.at<float>(0) << "," << t.at<float>(1) << "," << t.at<float>(2) << endl;
-
-                sortedLocalKeyFrames[i]->UpdateConnections();
-
-                // cout << "before: " << tmp << endl;
-                // cout << "after: " << TiwCorrected << endl;
-                //end added by CY
-
-                cv::Mat Riw = Tiw.rowRange(0, 3).colRange(0, 3);
-                // cv::Mat RiwCorrected = TiwCorrected.rowRange(0, 3).colRange(0, 3);
-                cv::Mat tiw = Tiw.rowRange(0, 3).col(3);
-                // cv::Mat tiwCorrected = TiwCorrected.rowRange(0, 3).col(3);
-                g2o::Sim3 g2oiw(Converter::toMatrix3d(Riw), Converter::toVector3d(tiw), 1.);
-                // g2o::Sim3 g2oiwCorrected(Converter::toMatrix3d(RiwCorrected), Converter::toVector3d(tiwCorrected), 1./scale/* /oldScale */);
-                // g2o::Sim3 g2owiCorrected = g2oiwCorrected.inverse();
-                g2o::Sim3 g2oSwiCorrected = g2oSiwCorrected.inverse();
-
-                vector<MapPoint *> mapPointsMatches = sortedLocalKeyFrames[i]->GetMapPointMatches();
-                for (size_t indexMP = 0; indexMP < mapPointsMatches.size(); indexMP++)
-                {
-                    MapPoint *mapPointi = mapPointsMatches[indexMP];
-                    if (!mapPointi || mapPointi->isBad())
-                        continue;
-                    if (mapPointi->mnCorrectedByKF == mpLastKeyFrame->mnId)
-                        continue;
-
-                    cv::Mat P3Dw = mapPointi->GetWorldPos();
-                    Eigen::Matrix<double, 3, 1> eigP3Dw = Converter::toVector3d(P3Dw);
-                    Eigen::Matrix<double, 3, 1> eigCorrectedP3Dw = g2oSwiCorrected.map(g2oiw.map(eigP3Dw));
-                    cv::Mat correctedMapPoint = Converter::toCvMat(eigCorrectedP3Dw);
-                    mapPointi->SetWorldPos(correctedMapPoint);
-                    mapPointi->mnCorrectedByKF = mpLastKeyFrame->mnId;
-                    mapPointi->mnCorrectedReference = sortedLocalKeyFrames[i]->mnId;
-                    mapPointi->UpdateNormalAndDepth();
-                }
-            }
-
-            cv::Mat Tcf = mpLastKeyFrame->GetPose() * Twf;
-            Tcf.rowRange(0, 3).col(3) = Tcf.rowRange(0, 3).col(3) * scale; //  / oldScale;
-            cv::Mat TcwCorrected = Tcf * firstFrame->GetPose();
-            mpLastKeyFrame->SetPose(TcwCorrected);
-            mCurrentFrame.SetPose(TcwCorrected);
-
-            mpLastKeyFrame->UpdateConnections();
-
-            //        cout << endl;
-
-            beforeFile.close();
-            afterFile.close();
-            // exit(1);
-
-            //commented by cy: I dont think this is needed
-            //cv::Mat curPose = mpReferenceKF->GetPose() * mLastFrame.mTcw.inv();
-            //curPose.col(3).rowRange(0,3) = curPose.col(3).rowRange(0,3) * scale / oldScale;
-            //curPose = mpReferenceKF->GetPoseInverse() * curPose.clone();
-            //mLastFrame.SetPose(curPose);
-
-            //mVelocity = mpReferenceKF->GetPose() * mVelocity.clone();
-            //mVelocity.col(3).rowRange(0,3) = mVelocity.col(3).rowRange(0,3) * scale / oldScale;
-            //mVelocity = mpReferenceKF->GetPoseInverse() * mVelocity.clone();
-
-            //added by CY
-            cv::Mat bv = mVelocity.clone();
-            // float oldScale = cv::norm(mVelocity.rowRange(0,3).col(3));
-            mVelocity.col(3).rowRange(0, 3) = mVelocity.col(3).rowRange(0, 3) * scale;
-
-            // cout << "scale: " << oldScale << " " << scale << endl;
-            // cout << "Before velocity " << bv << endl << mVelocity << endl;
-
-            //  This part is for the map points, I haven't finish this one since if the keyframe is wrong, I think the map points will
-            //  be even more wrong.
-            // TODO: finish this part
-            /*for(int i = 0 ; i < (int)mvpLocalMapPoints.size() ; i++)
-        {
-            cv::Mat poseHomog = cv::Mat::ones(4,1,CV_32F), pose;
-            mvpLocalMapPoints[i]->GetWorldPos().copyTo(poseHomog.rowRange(0,3)); //poseHomog is T_pw
-
-            //  cout << "before pt " << poseHomog.rowRange(0,3);
-        
-            poseHomog = Twc * poseHomog; //Tpc
-            //float oldScale = cv::norm(poseHomog.rowRange(0,3).col(0));
-
-            //point from current frame, transform back to global coordinate
-            poseHomog.rowRange(0,3).col(0) = poseHomog.rowRange(0,3).col(0) * scale / oldScale;
-            cv::Mat pGlobal =  TcwCorrected * poseHomog;
-            pose = pGlobal.rowRange(0,3);
-            //  cout << " after pt " << pose << endl;
-
-            //  g2o::Sim3
-
-            mvpLocalMapPoints[i]->SetWorldPos(pose);
-            mvpLocalMapPoints[i]->UpdateNormalAndDepth();
-
-
-            // cout << "size " << pGlobal.rows << " " << pGlobal.cols << endl;
-            //poseHomog = mpReferenceKF->GetPose() * poseHomog.clone();
-            //poseHomog.rowRange(0,3).col(3) = poseHomog.rowRange(0,3).col(3) * scale / oldScale;
-            // poseHomog = mpReferenceKF->GetPoseInverse() * poseHomog.clone();
-            //pose = poseHomog.col(0).rowRange(0,3);
-            //mvpLocalMapPoints[i]->SetWorldPos(pose);
-        }*/
-
-            oldScale = scale;
-            n.copyTo(prevNormal);
-            bNeedRescale = false;
-            mTimeStampLastUpdate = mCurrentFrame.mTimeStamp;
-
-            UpdateLocalMap();
-            mpMapDrawer->DrawMapPoints();
-
-            // Allow the Local Mapper to continue
-            mpLocalMapper->Release();
         }
-
-        //    Do local BA for refinement (optional)
+    }
+    else
+    {
+        consecutive = 0; //reset consecutive
+        return 1.;
     }
 
     // bNeedRescale = false;

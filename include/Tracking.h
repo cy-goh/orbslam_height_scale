@@ -148,7 +148,8 @@ protected:
     void SearchLocalPoints();
 
     bool NeedNewKeyFrame();
-    void CreateNewKeyFrame();
+    // void CreateNewKeyFrame();
+    void CreateNewKeyFrame(float scale);
 
     // In case of performing only localization, this flag is true when there are no matches to
     // points in the map. Still tracking will continue if there are enough matches with temporal points.
@@ -224,21 +225,25 @@ protected:
 
     /********* AVT added functions and variables **********/
     const double NORMAL_ANGLE_THRESHOLD = 3.0 * M_PI / 180;
-    const double SCALE_UPDATE_PERIOD = 2.0; // should be in seconds
+    const double SCALE_UPDATE_PERIOD = 1.5; // should be in seconds
     const static int WINDOW_SIZE = 6;
 
     double mTimeStampLastUpdate;
     bool bNeedRescale;
     cv::Mat prevNormal, mPriorNormal;
     float oldScale;
-    vector<float> window;
+    vector<float> mWindow;
+    vector<float> mWeights;
+    vector<float> mGtScales;
 
     void FilterSrcAndDstPointsBasedOnMask(vector<cv::Point2f> &srcPoints, vector<cv::Point2f> &dstPoints, cv::Mat mask);
     bool SolveH(vector<Point2f> &srcPoint, vector<Point2f> &dstPoint, cv::Mat &H, Mat &mask, cv::Mat &R, cv::Mat &t);
     void SolveRT(vector<cv::Point2f> &srcPoints, vector<cv::Point2f> &dstPoints, Mat &R, Mat &t, Mat &mask);
     void InitialSolver(cv::Mat R, cv::Mat t, cv::Mat H, float &d0, cv::Mat &n);
     float EstimateScale(float &d, cv::Mat &n, cv::Mat refR = cv::Mat(), cv::Mat refT = cv::Mat());
-    void Rescale();
+    float GetScaleGt(KeyFrame *kf);
+    float GetScaleGt(Frame &kf);
+    float ManageScale();
 
     vector<int> GetGroundPts(vector<Point2f> &srcPoint, vector<Point2f> &dstPoint);
     vector<int> GetPointsByROI(vector<Point2f> &srcPoint, vector<Point2f> &dstPoint);

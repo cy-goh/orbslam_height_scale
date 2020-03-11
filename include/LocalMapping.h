@@ -23,6 +23,7 @@
 
 #include "KeyFrame.h"
 #include "Map.h"
+#include "Converter.h"
 #include "LoopClosing.h"
 #include "Tracking.h"
 #include "KeyFrameDatabase.h"
@@ -72,6 +73,13 @@ public:
         return mlNewKeyFrames.size();
     }
 
+
+    //CY addition
+    double mTimeStampLastUpdate;
+    float mLastAddedScale;
+    int mLastCorrectedId;
+    const double SCALE_UPDATE_PERIOD = 1; // should be in seconds
+
 protected:
 
     bool CheckNewKeyFrames();
@@ -82,6 +90,8 @@ protected:
     void SearchInNeighbors();
 
     void KeyFrameCulling();
+
+    void Rescale(KeyFrame *targetKF);
 
     cv::Mat ComputeF12(KeyFrame* &pKF1, KeyFrame* &pKF2);
 
@@ -121,6 +131,8 @@ protected:
 
     bool mbAcceptKeyFrames;
     std::mutex mMutexAccept;
+
+
 };
 
 } //namespace ORB_SLAM

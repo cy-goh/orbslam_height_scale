@@ -54,6 +54,9 @@ KeyFrame::KeyFrame(Frame &F, Map *pMap, KeyFrameDatabase *pKFDB):
     }
 
     SetPose(F.mTcw);    
+
+    //TODO: cy added
+    this->mScale = -1;
 }
 
 void KeyFrame::ComputeBoW()
@@ -448,6 +451,18 @@ void KeyFrame::SetErase()
     {
         SetBadFlag();
     }
+}
+
+float KeyFrame::GetScale()
+{
+    unique_lock<mutex> lock(mMutexScale);
+    return mScale;
+}
+
+void KeyFrame::SetEstimatedScale(float s)
+{
+    unique_lock<mutex> lock(mMutexScale);
+    mScale = s;
 }
 
 void KeyFrame::SetBadFlag()

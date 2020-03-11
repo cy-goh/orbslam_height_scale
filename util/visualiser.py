@@ -3,12 +3,13 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sb
 import os
+import sys
 sb.set()
 
 
 # seq = "00"
 # seq = "04"
-seq = "06"
+seq = sys.argv[1] 
 # seq = "07"
 #orb_lcse_filename = "result/KeyFrameTrajectory-LCSE-" + seq + ".txt"
 orb_lcse_filename = "KeyFrameTrajectory-" + seq + ".txt"
@@ -23,15 +24,17 @@ df_orb_lcse['Type'] = "ORB SLAM with LC & SE"
 df_orb_lcse.rename(columns={1:"x", 3:"z"}, inplace=True)
 
 df_truth = pd.read_csv(ground_truth_filename, sep=' ', header=None)
+#import pdb; pdb.set_trace()
 df_truth = df_truth[[3,11]]
 df_truth["Type"] = "Ground Truth"
 df_truth.rename(columns={3:"x", 11:"z"}, inplace=True)
 
 
+
 df_combine = pd.concat([df_orb_lcse, df_truth])
 
-#sb.lineplot(x="x", y="z", hue="Type", data=df_combine, sort=False)
-sb.scatterplot(x="x", y="z", hue="Type", data=df_combine)
+sb.lineplot(x="x", y="z", hue="Type", data=df_combine, sort=False)
+#sb.scatterplot(x="x", y="z", hue="Type", data=df_combine)
 
 
 

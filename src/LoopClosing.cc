@@ -595,8 +595,9 @@ void LoopClosing::CorrectLoop()
     mbRunningGBA = true;
     mbFinishedGBA = false;
     mbStopGBA = false;
+    //TODO: put it back into a thread
     mpThreadGBA = new thread(&LoopClosing::RunGlobalBundleAdjustment,this,mpCurrentKF->mnId);
-
+    // RunGlobalBundleAdjustment(mpCurrentKF->mnId);
     // Loop closed. Release Local Mapping.
     mpLocalMapper->Release();    
 

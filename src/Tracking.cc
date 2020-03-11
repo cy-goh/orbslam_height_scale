@@ -159,7 +159,54 @@ Tracking::Tracking(System *pSys, ORBVocabulary *pVoc, FrameDrawer *pFrameDrawer,
     eigRot(2, 1) = sin(pitch_rot);
     eigRot(2, 2) = cos(pitch_rot);
     Eigen::Vector4f eigN = eigRot * v;
-    mPriorNormal = (cv::Mat_<float>(3,1) << eigN(0), eigN(1), eigN(2) );
+    mPriorNormal = (cv::Mat_<float>(3, 1) << eigN(0), eigN(1), eigN(2));
+
+    mWeights = {.1, .2, .4, 0.6, 0.8, 1.};
+
+    ifstream gt;
+    gt.open(("/home/cy/Documents/data/kitti/data_odometry_poses/06.txt"));
+    if (!gt)
+    {
+        cout << "unable to open gt file" << endl;
+        exit(1);
+    }
+
+    float x = -1, y = -1, z = -1;
+    while (true)
+    {
+        float _, cx, cy, cz;
+
+        gt >> _;
+        gt >> _;
+        gt >> _;
+        gt >> cx;
+        gt >> _;
+        gt >> _;
+        gt >> _;
+        gt >> cy;
+        gt >> _;
+        gt >> _;
+        gt >> _;
+        gt >> cz;
+
+        if (z == -1 && y == -1 && z == -1)
+        {
+            x = cx;
+            y = cy;
+            z = cz;
+        }
+        else
+        {
+            float scale = sqrt(pow(cx - x, 2) + pow(cy - y, 2) + pow(cz - z, 2));
+            mGtScales.push_back(scale);
+            x = cx;
+            y = cy;
+            z = cz;
+        }
+
+        if (gt.eof())
+            break;
+    }
 }
 
 void Tracking::SetLocalMapper(LocalMapping *pLocalMapper)
@@ -465,7 +512,6 @@ void Tracking::Track()
             }
             mlpTemporalPoints.clear();
 
-
             //FIXME: turn this on/off
             // [SCALE CORRECTION] I (tried to) rescale the map every given interval
             // Comment this section if you don't want to have scale correction
@@ -483,9 +529,22 @@ void Tracking::Track()
                 // mTimeStampLastUpdate = mCurrentFrame.mTimeStamp;
             }
 
+            float s = 1.;
+            // if (cv::norm(mVelocity.rowRange(0,3).col(3)) > 0.2)
+            if (true)
+            {
+                s = ManageScale();
+                cout << "frame " << mCurrentFrame.mnId << " velocity: " << cv::norm(mVelocity.rowRange(0, 3).col(3)) << " gt: " << GetScaleGt(mLastFrame) << "scale: " << s * cv::norm(mVelocity.rowRange(0, 3).col(3)) << " multiplier:" << s << endl;
+            }
+            else
+            {
+                cout << "SLOW SPEED DETECTED..." << endl;
+            }
+            
+
             // Check if we need to insert a new keyframe
             if (NeedNewKeyFrame())
-                CreateNewKeyFrame();
+                CreateNewKeyFrame(s);
 
             // We allow points with high innovation (considererd outliers by the Huber Function)
             // pass to the new keyframe, so that bundle adjustment will finally decide
@@ -662,6 +721,16 @@ void Tracking::MonocularInitialization()
     }
 }
 
+float Tracking::GetScaleGt(Frame &f)
+{
+    return mGtScales[f.mnId];
+}
+
+float Tracking::GetScaleGt(KeyFrame *kf)
+{
+    return mGtScales[kf->mnFrameId];
+}
+
 void Tracking::CreateInitialMapMonocular()
 {
     // Create KeyFrames
@@ -674,6 +743,8 @@ void Tracking::CreateInitialMapMonocular()
     // Insert KFs in the map
     mpMap->AddKeyFrame(pKFini);
     mpMap->AddKeyFrame(pKFcur);
+
+    mpLocalMapper->mTimeStampLastUpdate = pKFcur->mTimeStamp;
 
     // Create MapPoints and asscoiate to keyframes
     for (size_t i = 0; i < mvIniMatches.size(); i++)
@@ -716,17 +787,24 @@ void Tracking::CreateInitialMapMonocular()
     float medianDepth = pKFini->ComputeSceneMedianDepth(2);
     float invMedianDepth = 1.0f / medianDepth;
     float d;
-    
+
     cv::Mat n;
     cv::Mat R = pKFcur->GetRotation();
     cv::Mat t = pKFcur->GetPose().rowRange(0, 3).col(3);
 
-    float scale = EstimateScale(d, n, R, t);
-    float angle = CosineAngle(mPriorNormal, n);
+    //TODO: reenable this after ground truth is remvoed
+    // float scale = EstimateScale(d, n, R, t);
+    // float angle = CosineAngle(mPriorNormal, n);
+
+    float scale = GetScaleGt(pKFini);
+    float angle = 0.;
+
+    cout << "TRANSLATION SCALE IS " << cv::norm(t) << endl;
+    cout << "INTIALIZING AT SCALE " << scale << endl;
 
     if (angle > NORMAL_ANGLE_THRESHOLD)
     {
-        cout << "Poor initiation. Angle: " << angle * 180 / M_PI  << endl;
+        cout << "Poor initiation. Angle: " << angle * 180 / M_PI << endl;
         Reset();
         return;
     }
@@ -1110,7 +1188,8 @@ bool Tracking::NeedNewKeyFrame()
         return false;
 }
 
-void Tracking::CreateNewKeyFrame()
+//void Tracking::CreateNewKeyFrame()
+void Tracking::CreateNewKeyFrame(float scale)
 {
     if (!mpLocalMapper->SetNotStop(true))
         return;
@@ -1182,6 +1261,33 @@ void Tracking::CreateNewKeyFrame()
         }
     }
 
+    if (fabs(scale - 1) > 0.075)
+    {
+        mVelocity.rowRange(0, 3).col(3) *= scale;
+        mCurrentFrame.mTcw = mVelocity * mLastFrame.mTcw;
+    }
+
+    pKF->SetEstimatedScale(scale);
+
+    // if (bNeedRescale)
+    // {
+    //     float s = ManageScale();
+    //     //float s = GetScaleGt(pKF);
+    //     float g = s;
+    //     s /= cv::norm(mVelocity.rowRange(0, 3).col(3));
+    //     cout << "gt scale: " << g << " velocity:" << cv::norm(mVelocity.rowRange(0, 3).col(3)) << " rescaled:" << s << endl;
+
+    //     pKF->SetEstimatedScale(s);
+    //     bNeedRescale = false;
+
+    //     if (fabs(s - 1) > 0.075)
+    //     {
+    //         mVelocity.rowRange(0, 3).col(3) *= s;
+    //         mCurrentFrame.mTcw = mVelocity * mLastFrame.mTcw;
+    //     }
+
+    // }
+
     mpLocalMapper->InsertKeyFrame(pKF);
 
     mpLocalMapper->SetNotStop(false);
@@ -1190,16 +1296,14 @@ void Tracking::CreateNewKeyFrame()
     mpLastKeyFrame = pKF;
 
     // After we insert the keyframes, if we need to rescale, then we do the rescaling.
-    if (bNeedRescale)
-        Rescale();
+    //if (bNeedRescale)
+    //    Rescale();
 }
 
 Tracking::~Tracking()
 {
     mTxFile.close();
 }
-
-
 
 void Tracking::SearchLocalPoints()
 {
