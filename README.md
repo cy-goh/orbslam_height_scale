@@ -35,6 +35,8 @@ The dense estimator used an aggregation of output from previous n frames, as inp
 
 Another method I have tried is to add in a robust huber kernel of thrshold k = 50/255., to limit effects of ROI not being entirely flat surface. This seemed to have little effects on the results.
 
+To get a sense of the accuracy of the scale estimation for each frame, checkout the log output.txt.
+
 
 
 ![](image/avg_huber50_0_250_rmse0.079_valid221_new.png)
