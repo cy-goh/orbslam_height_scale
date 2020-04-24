@@ -39,6 +39,5 @@ private:
     std::vector<cv::Point2f> denseROI;
     vector<float> scales_gt;
 
-
     int last_rescaled;
 };

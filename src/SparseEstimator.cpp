@@ -100,6 +100,9 @@ float SparseScaleEstimator::calculate_scale(Mat &desc1, Mat &desc2, vector<KeyPo
     vector<Point2f> src_pts, dst_pts;
     get_RT(kp1, kp2, matches, inliers, R, t, mask, src_pts, dst_pts);
 
+    cout << "Found R: \n " << R << endl;
+    cout << "Found t: \n " << t << endl;
+
     {
         int idx = 0; // idx will be the first index in which the mask = 0, also corresponds to the number of points with mask = 1
         for (MatConstIterator_<uchar> it = mask.begin<uchar>(); it != mask.end<uchar>(); ++it)
@@ -203,87 +206,114 @@ float SparseScaleEstimator::calculate_scale(Mat &desc1, Mat &desc2, vector<KeyPo
                 ret_scale = actual_height * cv::norm(op_norm);
         }
     }
-    /*for (int i = 0; i < iterations; ++i)
+
+    cout << "ransac compared:" << ransac_count << " points: " << n_points << endl;
+    return ret_scale;
+}
+
+float SparseScaleEstimator::calculate_scale(Mat &refR, Mat &refT, Mat &desc1, Mat &desc2, vector<KeyPoint> kp1, vector<KeyPoint> kp2, int iterations, float accepted_ratio, Mat &op_norm, float &inlier_ratio)
+{
+    std::vector<DMatch> matches;
+    get_matches(kp1, kp2, desc1, desc2, matches);
+
+    vector<Point2f> src_pts, dst_pts;
+
+    for (auto m : matches)
     {
-        //random sample 3 numbers
-        vector<int> sample_indices;
-        for (int j = 0; j < n_points; ++j)
-            sample_indices.push_back(j);
+        src_pts.push_back(kp1[m.queryIdx].pt);
+        dst_pts.push_back(kp2[m.trainIdx].pt);
+    }
 
-        shuffle(sample_indices.begin(), sample_indices.end(), g);
+    //TODO: this is not yet transpsoe
+    Mat pts_3D;
+    try
+    {
+        pts_3D = triangulate_pairs(refR, refT, src_pts, dst_pts);
+        // pts_3D = triangulate_pairs(R, t, src_pts, dst_pts);
+    }
+    catch (Exception e)
+    {
+        return -1;
+    }
+    vector<int> ground_idx = filter_ground_ROI(src_pts);
+    size_t n_points = ground_idx.size();
 
-        Mat p(3, 3, CV_32F);
+    // cout << "ground points: " << n_points << endl;
+    if (n_points < 8)
+    {
+        return -1;
+    }
 
-        ground_X.row(sample_indices[0]).copyTo(p.row(0));
-        ground_X.row(sample_indices[1]).copyTo(p.row(1));
-        ground_X.row(sample_indices[2]).copyTo(p.row(2));
+    Mat ground_X(n_points, 3, CV_32F);
+    for (int i = 0; i < n_points; ++i)
+    {
+        Mat pt = pts_3D.col(ground_idx[i]);
+        pt /= pt.at<float>(3, 0);
+        Mat tmp = pt.rowRange(0, 3).col(0).t();
+        tmp.copyTo(ground_X.row(i).colRange(0, 3));
+    }
 
-        //calculate model
-        Mat model = p.inv() * b;
-        float model_norm = cv::norm(model);
-        float height = 1 / model_norm;
-        Mat unit_model = model / model_norm;
+    // cout << "There are " << n_points << " points" << endl;
 
-        int inliers_count = 0;
-        vector<int> inlier_indices;
+    //run ransac
+    std::random_device rd;
+    std::mt19937 g(rd());
 
-        for (int j = 3; j < sample_indices.size(); ++j)
+    cv::Mat b = cv::Mat::ones(3, 1, CV_32F);
+
+    float err_threshold = .2;
+    // float best_error = 10000000;
+    float ret_scale = -1.;
+    int times_compared = 0;
+
+    auto start2 = chrono::steady_clock::now();
+
+    int ransac_count = 0;
+    op_norm = run_ransac(ground_X, iterations, err_threshold, accepted_ratio, ransac_count, inlier_ratio);
+
+    if (!op_norm.empty())
+        ret_scale = actual_height * cv::norm(op_norm);
+    else
+    {
+        float small_angle_thres = .5;
+        vector<int> valid_indices;
+
+        Mat t2;
+        refT.convertTo(t2, CV_32F);
+
+        for (int i = 0; i < n_points; ++i)
         {
-            Mat other_pt = ground_X.row(sample_indices[j]);
+            Mat p3 = ground_X.row(i);
 
-            float pt_height = other_pt.t().dot(unit_model);
-            if (fabs(pt_height - height) < err_threshold)
+            // cout << t << endl;
+            // cout << p3 << endl;
+
+            Mat p31 = -p3;
+            Mat p32 = t2.t() - p3;
+
+            float tri_angle = CosineAngle(p31, p32) * 180. / M_PI;
+            if (tri_angle > small_angle_thres)
             {
-                inliers_count++;
-                inlier_indices.push_back(sample_indices[j]);
+                valid_indices.push_back(i);
             }
         }
 
-        // cout << "inliers: " << inliers_count << "(" <<  inliers_count * 1. / n_points << ")" <<  endl;
-
-        //refit with all inlier points
-        if ((inliers_count * 1. / (n_points - 3)) > accepted_ratio)
+        cout << "RANSAC retry: Reducing points from " << n_points << " to " << valid_indices.size() << endl;
+        if (valid_indices.size() >= 8)
         {
-            inlier_indices.push_back(sample_indices[0]);
-            inlier_indices.push_back(sample_indices[1]);
-            inlier_indices.push_back(sample_indices[2]);
-            inliers_count += 3;
+            n_points = valid_indices.size();
 
-            cv::Mat all_P = cv::Mat::zeros(inliers_count, 3, CV_32F);
-            for (int j = 0; j < inliers_count; ++j)
+            cv::Mat reduced_X(valid_indices.size(), 3, CV_32F);
+            for (int i = 0; i < valid_indices.size(); ++i)
             {
-                ground_X.row(inlier_indices[j]).copyTo(all_P.row(j));
+                ground_X.row(valid_indices[i]).copyTo(reduced_X.row(i));
             }
 
-            cv::Mat all_model;
-            cv::Mat all_b = Mat::ones(inliers_count, 1, CV_32F);
-            cv::solve(all_P, all_b, all_model, DECOMP_SVD);
-
-            float all_model_norm = cv::norm(all_model);
-            float all_height = 1. / all_model_norm;
-            Mat unit_all_model = all_model / all_model_norm;
-
-            Mat ys = all_P * (unit_all_model);
-            ys -= all_height;
-            float avg_hdiff = ys.dot(ys) / inliers_count;
-            avg_hdiff = sqrt(avg_hdiff);
-
-            if (avg_hdiff < best_error)
-            {
-                best_error = avg_hdiff;
-                ret_scale = actual_height / all_height;
-                op_norm = all_model.clone();
-                inlier_ratio = inliers_count * 1. / n_points;
-
-                times_compared++;
-            }
+            op_norm = run_ransac(reduced_X, iterations, err_threshold, accepted_ratio, ransac_count, inlier_ratio);
+            if (!op_norm.empty())
+                ret_scale = actual_height * cv::norm(op_norm);
         }
-    }*/
-
-    //auto end2 = chrono::steady_clock::now();
-    // cout << "Elapsed time in ransac : "
-    // 	<< chrono::duration_cast<chrono::milliseconds>(end2 - start2).count()
-    // 	<< " ms" << endl;
+    }
 
     cout << "ransac compared:" << ransac_count << " points: " << n_points << endl;
     return ret_scale;

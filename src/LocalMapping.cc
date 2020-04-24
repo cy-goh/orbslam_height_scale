@@ -791,8 +791,8 @@ void LocalMapping::Rescale(KeyFrame *targetKF)
 
     for (auto pKFi : covisKF)
     {
-         if (!pKFi->isBad())
-        // if (!pKFi->isBad() && pKFi->mnId > mLastCorrectedId)
+        //  if (!pKFi->isBad())
+        if (!pKFi->isBad() && pKFi->mnId > mLastCorrectedId)
         {
             localKF.push_back(pKFi);
             if (pKFi->mnId > maxIdToCorrect)

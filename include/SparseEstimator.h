@@ -26,6 +26,8 @@ public:
 
     float calculate_scale(Mat &img1, Mat &img2, int iterations, float accepted_ratio, Mat &op_norm, float &inlier_ratio);
     float calculate_scale(Mat &desc1, Mat &desc2, vector<KeyPoint> kp1, vector<KeyPoint> kp2, int iterations, float accepted_ratio, Mat &op_norm, float &inlier_ratio);
+    float calculate_scale(Mat& refR, Mat &refT, Mat &desc1, Mat &desc2, vector<KeyPoint> kp1, vector<KeyPoint> kp2, int iterations, float accepted_ratio, Mat &op_norm, float &inlier_ratio);
+
 
     Mat run_ransac(Mat &ground_pts, int n_iterations, float inlier_threshold, float inlier_ratio, int &ransac_count, float &fitted_ratio);
 

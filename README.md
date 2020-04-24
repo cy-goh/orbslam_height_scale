@@ -4,6 +4,45 @@ This project attempts to recover the absolute scale in the SLAM map produced by 
 [Ground Plane based Absolute Scale Estimation for Monocular Visual Odometry](https://arxiv.org/pdf/1903.00912.pdf) and
 [Reliable Scale Estimation and Correction for Monocular Visual Odometry](https://drive.google.com/file/d/0B73o7D_54u1LcFRPeWlIR1VubzA/view).
 
+
+
+##Updates (24 April)
+
+I am wrapping up the tests for scale estimation using a calibrated height (1.7m). Right now it is using the following methods
+
+1. Sparse scale+ norm estimator within ROI using feature matching and ransac normal fitting.
+2. Dense scale+norm estimator using dense pixel LK tracking using Gauss Newton.
+3. Mean filtering of norm and scale output to stablise noisy outputs from above methods 1,2.
+4. Scale estimation is performed every frame (in order to provide mean filtering), although scale correction is only performed once specific criterias are met. 
+
+
+
+### Conclusions
+
+Right now, with loop closure (7 DOF) turned on, results vary, at least with tests done on Seq 06, output trajectory accuracies vary between runs. See below.
+
+![A bad Run](image/seq06_badrun.png)
+
+
+
+![](image/seq06_goodrun.png)
+
+As of now, the main issue seems to stem from the problem that sparse scale estimator's output has high variance, unable to produce consistent esimates. There are instances where it is producing accurate estimate < 0.1m on 1 frame,  where on the next frame it produced esimates > 0.3m. 
+
+The dense estimator can fall into local minimas. There may be occasions where the dense estimator produced scale estimates that are further away from the ground truth than the sparse estimator. It may also be attributed to the low pixel gradient from the ROI that the dense estimator may not able to correct estimates that are too far away.   
+
+The dense estimator used an aggregation of output from previous n frames, as input for the current frame. The benefit is that it will smooth away noisy estimations that per frame sparse estimators produced. However this will also have a detrimental effect when the vehicle is change velocity. See the second image below, from frame 300 to 350. Red dots are outputs from the per frame sparse estimator, and green dots are the per frame estimations of the dense estimator, whose inputs are aggregation of the past 5 frames.
+
+Another method I have tried is to add in a robust huber kernel of thrshold k = 50/255., to limit effects of ROI not being entirely flat surface. This seemed to have little effects on the results.
+
+
+
+![](image/avg_huber50_0_250_rmse0.079_valid221_new.png)
+
+![](image/avg_huber50_251_500_rmse0.12_valid165_new.png)
+
+---
+
 ## Notes
 Since the rescaling part is not good, I turned it off for now. So, the default mode is just Scale Estimation without
 any Scale Corrections. If you want to add Scale Corrections, find in Tracking.cc "[SCALE CORRECTION]", uncomment the given code.
@@ -342,7 +381,7 @@ For a monocular input from topic `/camera/image_raw` run node ORB_SLAM2/Mono. Yo
   ```
   rosrun ORB_SLAM2 Mono PATH_TO_VOCABULARY PATH_TO_SETTINGS_FILE
   ```
-  
+
 ### Running Monocular Augmented Reality Demo
 This is a demo of augmented reality where you can use an interface to insert virtual cubes in planar regions of the scene.
 The node reads images from topic `/camera/image_raw`.
@@ -350,27 +389,27 @@ The node reads images from topic `/camera/image_raw`.
   ```
   rosrun ORB_SLAM2 MonoAR PATH_TO_VOCABULARY PATH_TO_SETTINGS_FILE
   ```
-  
+
 ### Running Stereo Node
 For a stereo input from topic `/camera/left/image_raw` and `/camera/right/image_raw` run node ORB_SLAM2/Stereo. You will need to provide the vocabulary file and a settings file. If you **provide rectification matrices** (see Examples/Stereo/EuRoC.yaml example), the node will recitify the images online, **otherwise images must be pre-rectified**.
 
   ```
   rosrun ORB_SLAM2 Stereo PATH_TO_VOCABULARY PATH_TO_SETTINGS_FILE ONLINE_RECTIFICATION
   ```
-  
+
 **Example**: Download a rosbag (e.g. V1_01_easy.bag) from the EuRoC dataset (http://projects.asl.ethz.ch/datasets/doku.php?id=kmavvisualinertialdatasets). Open 3 tabs on the terminal and run the following command at each tab:
   ```
   roscore
   ```
-  
+
   ```
   rosrun ORB_SLAM2 Stereo Vocabulary/ORBvoc.txt Examples/Stereo/EuRoC.yaml true
   ```
-  
+
   ```
   rosbag play --pause V1_01_easy.bag /cam0/image_raw:=/camera/left/image_raw /cam1/image_raw:=/camera/right/image_raw
   ```
-  
+
 Once ORB-SLAM2 has loaded the vocabulary, press space in the rosbag tab. Enjoy!. Note: a powerful computer is required to run the most exigent sequences of this dataset.
 
 ### Running RGB_D Node
@@ -379,7 +418,7 @@ For an RGB-D input from topics `/camera/rgb/image_raw` and `/camera/depth_regist
   ```
   rosrun ORB_SLAM2 RGBD PATH_TO_VOCABULARY PATH_TO_SETTINGS_FILE
   ```
-  
+
 # 8. Processing your own sequences
 You will need to create a settings file with the calibration of your camera. See the settings file provided for the TUM and KITTI datasets for monocular, stereo and RGB-D cameras. We use the calibration model of OpenCV. See the examples to learn how to create a program that makes use of the ORB-SLAM2 library and how to pass images to the SLAM system. Stereo input must be synchronized and rectified. RGB-D input must be synchronized and depth registered.
 
