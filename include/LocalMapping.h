@@ -79,6 +79,8 @@ public:
     float mLastAddedScale;
     int mLastCorrectedId;
     const double SCALE_UPDATE_PERIOD = 1; // should be in seconds
+    std::mutex mRescaleLocal;
+
 
 protected:
 

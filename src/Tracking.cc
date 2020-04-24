@@ -151,62 +151,8 @@ Tracking::Tracking(System *pSys, ORBVocabulary *pVoc, FrameDrawer *pFrameDrawer,
     }
 
     /************ AVT added **********/
-    const float pitch_rot = 4. * M_PI / 180.;
-    Eigen::Vector4f v(0, 1, 0, 1);
-    Eigen::Matrix4f eigRot = Eigen::Matrix4f::Identity();
-    eigRot(1, 1) = cos(pitch_rot);
-    eigRot(1, 2) = -sin(pitch_rot);
-    eigRot(2, 1) = sin(pitch_rot);
-    eigRot(2, 2) = cos(pitch_rot);
-    Eigen::Vector4f eigN = eigRot * v;
-    mPriorNormal = (cv::Mat_<float>(3, 1) << eigN(0), eigN(1), eigN(2));
-
     mWeights = {.1, .2, .4, 0.6, 0.8, 1.};
-
-    ifstream gt;
-    gt.open(("/home/cy/Documents/data/kitti/data_odometry_poses/06.txt"));
-    if (!gt)
-    {
-        cout << "unable to open gt file" << endl;
-        exit(1);
-    }
-
-    float x = -1, y = -1, z = -1;
-    while (true)
-    {
-        float _, cx, cy, cz;
-
-        gt >> _;
-        gt >> _;
-        gt >> _;
-        gt >> cx;
-        gt >> _;
-        gt >> _;
-        gt >> _;
-        gt >> cy;
-        gt >> _;
-        gt >> _;
-        gt >> _;
-        gt >> cz;
-
-        if (z == -1 && y == -1 && z == -1)
-        {
-            x = cx;
-            y = cy;
-            z = cz;
-        }
-        else
-        {
-            float scale = sqrt(pow(cx - x, 2) + pow(cy - y, 2) + pow(cz - z, 2));
-            mGtScales.push_back(scale);
-            x = cx;
-            y = cy;
-            z = cz;
-        }
-
-        if (gt.eof())
-            break;
-    }
+    scale_manager = new ScaleManager(1.7, mK);
 }
 
 void Tracking::SetLocalMapper(LocalMapping *pLocalMapper)
@@ -530,21 +476,31 @@ void Tracking::Track()
             }
 
             float s = 1.;
+            bool rescale;
             // if (cv::norm(mVelocity.rowRange(0,3).col(3)) > 0.2)
             if (true)
             {
-                s = ManageScale();
-                cout << "frame " << mCurrentFrame.mnId << " velocity: " << cv::norm(mVelocity.rowRange(0, 3).col(3)) << " gt: " << GetScaleGt(mLastFrame) << "scale: " << s * cv::norm(mVelocity.rowRange(0, 3).col(3)) << " multiplier:" << s << endl;
+                Mat R = mVelocity.rowRange(0, 3).colRange(0, 3);
+                Mat t = mVelocity.rowRange(0, 3).col(3);
+
+                float gt = scale_manager->GetScaleGt(mLastFrame.mnId);
+
+                // scale_manager->sanityCheck(mLastFrame, mCurrentFrame);
+                scale_manager->manageScale(mLastFrame, mCurrentFrame,mLastFrame.im, mCurrentFrame.im, mLastFrame.mnId, R, t, mLastFrame.mDescriptors, mCurrentFrame.mDescriptors, mLastFrame.mvKeys, mCurrentFrame.mvKeys, rescale, s);
+                // s = ManageScale();
+                if (s != -1)
+                    cout << "frame: " << mCurrentFrame.mnId << " gt: " << gt << " scale: " << s * cv::norm(mVelocity.rowRange(0, 3).col(3)) << endl << "======================" << endl;
+                else
+                    cout << "frame: " << mCurrentFrame.mnId << " gt: " << gt << " scale: -" << endl << "============================" << endl;
             }
             else
             {
                 cout << "SLOW SPEED DETECTED..." << endl;
             }
-            
 
             // Check if we need to insert a new keyframe
             if (NeedNewKeyFrame())
-                CreateNewKeyFrame(s);
+                CreateNewKeyFrame(s, rescale);
 
             // We allow points with high innovation (considererd outliers by the Huber Function)
             // pass to the new keyframe, so that bundle adjustment will finally decide
@@ -796,7 +752,7 @@ void Tracking::CreateInitialMapMonocular()
     // float scale = EstimateScale(d, n, R, t);
     // float angle = CosineAngle(mPriorNormal, n);
 
-    float scale = GetScaleGt(pKFini);
+    float scale = scale_manager->GetScaleGt(pKFini->mnFrameId); //GetScaleGt(pKFini);
     float angle = 0.;
 
     cout << "TRANSLATION SCALE IS " << cv::norm(t) << endl;
@@ -1189,7 +1145,7 @@ bool Tracking::NeedNewKeyFrame()
 }
 
 //void Tracking::CreateNewKeyFrame()
-void Tracking::CreateNewKeyFrame(float scale)
+void Tracking::CreateNewKeyFrame(float scale,  bool rescale)
 {
     if (!mpLocalMapper->SetNotStop(true))
         return;
@@ -1261,23 +1217,26 @@ void Tracking::CreateNewKeyFrame(float scale)
         }
     }
 
-    if (fabs(scale - 1) > 0.075)
+    if (rescale)
     {
         mVelocity.rowRange(0, 3).col(3) *= scale;
         mCurrentFrame.mTcw = mVelocity * mLastFrame.mTcw;
     }
 
     pKF->SetEstimatedScale(scale);
+    pKF->SetRescale(rescale);
 
     // if (bNeedRescale)
     // {
     //     float s = ManageScale();
-    //     //float s = GetScaleGt(pKF);
-    //     float g = s;
-    //     s /= cv::norm(mVelocity.rowRange(0, 3).col(3));
-    //     cout << "gt scale: " << g << " velocity:" << cv::norm(mVelocity.rowRange(0, 3).col(3)) << " rescaled:" << s << endl;
 
-    //     pKF->SetEstimatedScale(s);
+    // float s = GetScaleGt(pKF);
+    // float g = s;
+    // s /= cv::norm(mVelocity.rowRange(0, 3).col(3));
+    // cout << "gt scale: " << g << " velocity:" << cv::norm(mVelocity.rowRange(0, 3).col(3)) << " rescaled:" << s << endl;
+
+    // pKF->SetEstimatedScale(s);
+
     //     bNeedRescale = false;
 
     //     if (fabs(s - 1) > 0.075)

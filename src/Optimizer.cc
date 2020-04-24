@@ -848,6 +848,8 @@ void Optimizer::OptimizeEssentialGraph(Map* pMap, KeyFrame* pLoopKF, KeyFrame* p
     set<pair<long unsigned int,long unsigned int> > sInsertedEdges;
 
     const Eigen::Matrix<double,7,7> matLambda = Eigen::Matrix<double,7,7>::Identity();
+     Eigen::Matrix<double,7,7> matLambda2 = Eigen::Matrix<double,7,7>::Identity(); //TODO:
+    matLambda2(6, 6) *= 0.001;
 
     // Set Loop edges
     for(map<KeyFrame *, set<KeyFrame *> >::const_iterator mit = LoopConnections.begin(), mend=LoopConnections.end(); mit!=mend; mit++)

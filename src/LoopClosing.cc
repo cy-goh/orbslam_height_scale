@@ -74,6 +74,7 @@ void LoopClosing::Run()
                    // Perform loop fusion and pose graph optimization
                    CorrectLoop();
                }
+
             }
         }
         // ... to this part
@@ -233,6 +234,7 @@ bool LoopClosing::DetectLoop()
 bool LoopClosing::ComputeSim3()
 {
     // For each consistent loop candidate we try to compute a Sim3
+    // unique_lock<mutex> lock(mpLocalMapper->mRescaleLocal);
 
     const int nInitialCandidates = mvpEnoughConsistentCandidates.size();
 
@@ -272,8 +274,9 @@ bool LoopClosing::ComputeSim3()
             continue;
         }
         else
-        {
-            Sim3Solver* pSolver = new Sim3Solver(mpCurrentKF,pKF,vvpMapPointMatches[i],mbFixScale);
+        {   //TODO:
+            // Sim3Solver* pSolver = new Sim3Solver(mpCurrentKF,pKF,vvpMapPointMatches[i],false);
+            Sim3Solver* pSolver = new Sim3Solver(mpCurrentKF,pKF,vvpMapPointMatches[i], mbFixScale);
             pSolver->SetRansacParameters(0.99,20,300);
             vpSim3Solvers[i] = pSolver;
         }
@@ -325,6 +328,8 @@ bool LoopClosing::ComputeSim3()
                 matcher.SearchBySim3(mpCurrentKF,pKF,vpMapPointMatches,s,R,t,7.5);
 
                 g2o::Sim3 gScm(Converter::toMatrix3d(R),Converter::toVector3d(t),s);
+                //TODO:
+                // const int nInliers = Optimizer::OptimizeSim3(mpCurrentKF, pKF, vpMapPointMatches, gScm, 10, false);
                 const int nInliers = Optimizer::OptimizeSim3(mpCurrentKF, pKF, vpMapPointMatches, gScm, 10, mbFixScale);
 
                 // If optimization is succesful stop ransacs and continue
@@ -389,6 +394,8 @@ bool LoopClosing::ComputeSim3()
         for(int i=0; i<nInitialCandidates; i++)
             if(mvpEnoughConsistentCandidates[i]!=mpMatchedKF)
                 mvpEnoughConsistentCandidates[i]->SetErase();
+        cout << "found loop closure between " << mpMatchedKF->mnFrameId << " and  " << mpCurrentKF->mnFrameId << endl;
+        cout << "transformation is " << mScw << endl;
         return true;
     }
     else
@@ -592,14 +599,15 @@ void LoopClosing::CorrectLoop()
     mpCurrentKF->AddLoopEdge(mpMatchedKF);
 
     // Launch a new thread to perform Global Bundle Adjustment
-    mbRunningGBA = true;
-    mbFinishedGBA = false;
-    mbStopGBA = false;
+    // mbRunningGBA = true;
+    // mbFinishedGBA = false;
+    // mbStopGBA = false;
     //TODO: put it back into a thread
-    mpThreadGBA = new thread(&LoopClosing::RunGlobalBundleAdjustment,this,mpCurrentKF->mnId);
+    //mpThreadGBA = new thread(&LoopClosing::RunGlobalBundleAdjustment,this,mpCurrentKF->mnId);
     // RunGlobalBundleAdjustment(mpCurrentKF->mnId);
     // Loop closed. Release Local Mapping.
-    mpLocalMapper->Release();    
+    //TODO: renable this
+     mpLocalMapper->Release();    
 
     mLastLoopKFid = mpCurrentKF->mnId;   
 }

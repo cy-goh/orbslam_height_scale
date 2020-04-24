@@ -107,7 +107,9 @@ public:
 
     //cy
     void SetEstimatedScale(float s);
+    void SetRescale(bool s);
     float GetScale();
+    bool GetRescale();
 
     // Compute Scene Depth (q=2 median). Used in monocular.
     float ComputeSceneMedianDepth(const int q);
@@ -230,6 +232,7 @@ protected:
 
     float mHalfBaseline; // Only for visualization
     float mScale;
+    float mbRescale;
 
     Map* mpMap;
 
@@ -238,6 +241,7 @@ protected:
     std::mutex mMutexFeatures;
 
     std::mutex mMutexScale;
+    std::mutex mMutexRescale;
 };
 
 } //namespace ORB_SLAM

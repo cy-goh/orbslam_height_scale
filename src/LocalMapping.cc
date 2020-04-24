@@ -764,13 +764,20 @@ void LocalMapping::Rescale(KeyFrame *targetKF)
 {
     using namespace cv;
 
-    //no change to scale
+    unique_lock<mutex> lock2(mRescaleLocal);
+
+
     float scale = targetKF->GetScale();
-    if (scale == 1 || fabs(scale - 1) <= 0.075 || isnan(scale) || scale <= 0)
-    {
-        //cout << "scale: " << scale << " " << mLastAddedScale << endl;
+    bool rescale = targetKF->GetRescale();
+
+    if (!rescale)
         return;
-    }
+
+        // if (scale == -1 || fabs(scale - 1) <= 0.075 || isnan(scale) || scale <= 0)
+        // {
+        //     //cout << "scale: " << scale << " " << mLastAddedScale << endl;
+        //     return;
+        // }
 
     // cout << "no. of mappoint matches: " << targetKF->GetMapPointMatches().size() << endl;
 
@@ -784,7 +791,7 @@ void LocalMapping::Rescale(KeyFrame *targetKF)
 
     for (auto pKFi : covisKF)
     {
-        if (!pKFi->isBad())
+         if (!pKFi->isBad())
         // if (!pKFi->isBad() && pKFi->mnId > mLastCorrectedId)
         {
             localKF.push_back(pKFi);
@@ -800,10 +807,12 @@ void LocalMapping::Rescale(KeyFrame *targetKF)
     }
     mLastCorrectedId = targetKF->mnId;
 
-    cout << "RESCALING AT " << scale << " and " << localKF.size() <<  " KFs" << " target:" << targetKF->mnFrameId << endl;
+    cout << "RESCALING AT " << localKF.size() <<  " KFs" << " target:" << targetKF->mnFrameId << endl;
 
 
     unique_lock<mutex> lock(mpMap->mMutexMapUpdate);
+    
+    // mpTracker->mWindow.clear();
  
     //TODO: it is unknown at which KF i need to anchor first
     vector<KeyFrame *> sortedLocalKF(localKF);

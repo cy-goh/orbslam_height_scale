@@ -91,6 +91,8 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
     mptLocalMapping = new thread(&ORB_SLAM2::LocalMapping::Run,mpLocalMapper);
 
     //Initialize the Loop Closing thread and launch
+    //TODO
+    // mpLoopCloser = new LoopClosing(mpMap, mpKeyFrameDatabase, mpVocabulary, true);
     mpLoopCloser = new LoopClosing(mpMap, mpKeyFrameDatabase, mpVocabulary, mSensor!=MONOCULAR);
     mptLoopClosing = new thread(&ORB_SLAM2::LoopClosing::Run, mpLoopCloser);
 
@@ -102,12 +104,12 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
         mpTracker->SetViewer(mpViewer);
     }
 
-    //TODO: I am turning of loop closing now.
-    mpLoopCloser->RequestFinish();
-    while(!mpLoopCloser->isFinished())
-    {
-        usleep(5000);
-    }
+    // TODO: I am turning of loop closing now.
+    // mpLoopCloser->RequestFinish();
+    // while(!mpLoopCloser->isFinished())
+    // {
+    //     usleep(5000);
+    // }
 
     //Set pointers between threads
     mpTracker->SetLocalMapper(mpLocalMapper);

@@ -1,6 +1,8 @@
 #include "Tracking.h"
 #include "Converter.h"
 #include "Utils.h"
+#include "SparseEstimator.h"
+#include "DenseEstimator.h"
 #include <assert.h>
 #include <numeric>
 
@@ -176,9 +178,12 @@ bool Tracking::SolveH(vector<Point2f> &srcPoint, vector<Point2f> &dstPoint, cv::
     vector<int> pts2 = GetGroundPts(srcPoint, dstPoint);
     vector<int> pts12;
 
-    pts12.reserve( pts1.size() + pts2.size() ); // preallocate memory
-    pts12.insert( pts12.end(), pts1.begin(), pts1.end() );
-    pts12.insert( pts12.end(), pts2.begin(), pts2.end() );
+    pts12.reserve(pts1.size() + pts2.size()); // preallocate memory
+    pts12.insert(pts12.end(), pts1.begin(), pts1.end());
+    pts12.insert(pts12.end(), pts2.begin(), pts2.end());
+
+    cout << "There are " << pts2.size() << "ground pts. ";
+    cout << "There are " << pts12.size() << "ground + delauynay pts. " << endl;
 
     vector<Point2f> srcPointROI, dstPointROI;
     for (auto i : pts12)
@@ -465,10 +470,88 @@ float Tracking::EstimateScale(float &d, cv::Mat &n, cv::Mat refR, cv::Mat refT)
     return scale;
 }
 
+float Tracking::ManageScale()
+{
+    using namespace cv;
+
+    vector<Point2f> sparseROI = {Point2f(500, 230), Point2f(700, 230), Point2f(800 + 25, 380), Point2f(400 - 25, 380)};
+    vector<Point2f> denseROI = {Point2f(500, 230), Point2f(700, 230), Point2f(800, 330), Point2f(400, 330)};
+
+    SparseScaleEstimator sparseEst(mK, sparseROI, 1.7);
+    DenseScaleEstimator denseEst(mK, denseROI, 1.7);
+
+    Mat R = mVelocity.rowRange(0, 3).colRange(0, 3);
+    Mat t = mVelocity.rowRange(0, 3).col(3);
+
+    Mat est_norm;
+    float inlier_ratio;
+
+    float scale = sparseEst.calculate_scale(mLastFrame.mDescriptors, mCurrentFrame.mDescriptors, mLastFrame.mvKeys, mCurrentFrame.mvKeys, 50, 0.65, est_norm, inlier_ratio);
+
+    if (scale == -1)
+    {
+        cout << "Exception at sparse estimator" << endl;
+        return 1;
+    }
+
+    float angle = CosineAngle(mPriorNormal, est_norm) * 180. / M_PI;
+
+    cout << "Angle is " << angle << " inliers: " << inlier_ratio << endl;
+    if (angle > 10 || inlier_ratio < 0.65)
+    {
+        cout << "Bad sparse angle: " << angle << endl;
+        return 1.;
+    }
+
+    cout << "estimated norm: " << est_norm.at<float>(0, 0) << " " << est_norm.at<float>(1, 0) << " " << est_norm.at<float>(2, 0) << " (" << 1.7 * cv::norm(est_norm) << ")" <<  endl;
+
+    est_norm /= cv::norm(t);
+    float n1 = est_norm.at<float>(0, 0);
+    float n2 = est_norm.at<float>(1, 0);
+    float n3 = est_norm.at<float>(2, 0);
+
+    Mat final_norm;
+    float finalScale;
+
+    try
+    {
+        Mat img1f = mLastFrame.im.clone();
+        Mat img2f = mCurrentFrame.im.clone();
+        img1f.convertTo(img1f, CV_32F);
+        img2f.convertTo(img2f, CV_32F);
+        img1f /= 255.;
+        img2f /= 255.;
+        auto start1 = chrono::steady_clock::now();
+
+        finalScale = denseEst.optimize_scale(R, t, n1, n2, n3, 0, 30, img1f, img2f, final_norm, false);
+            
+        auto end1 = chrono::steady_clock::now();
+        // cout << "Elapsed time in get_matches : "  << chrono::duration_cast<chrono::milliseconds>(end1 - start1).count() << endl;
+    }
+    catch (std::string &err)
+    {
+        cout << "homography failed. " << err << endl;
+        return 1.;
+    }
+
+    float denseAngle = CosineAngle(mPriorNormal, final_norm) * 180 / M_PI;
+
+    if (denseAngle < 20)
+    {
+        cout << "good scale at " << finalScale * cv::norm(t) << endl;
+        return finalScale;
+    }
+    else 
+    {   
+        cout << "bad dense angle: " << denseAngle << endl;
+        return 1.;
+    }
+}
+
 // Ground Plane based Absolute Scale Estimation for Monocular Visual Odometry
 // This rescaling function is implementing the scale correction proposed by this paper
 // https://arxiv.org/pdf/1903.00912.pdf
-float Tracking::ManageScale()
+/*float Tracking::ManageScale()
 {
     // I think that if you want to modify the KeyFrame and MapPoints, still need to make sure that no other thread is using.
     // I don't know how to turned off the GBA in Tracking thread, so I just turned off the loop closing thread
@@ -571,5 +654,5 @@ float Tracking::ManageScale()
     // bNeedRescale = false;
     // bool test = false;
     // Optimizer::LocalBundleAdjustment(mpLastKeyFrame, &test, mpMap);
-}
+}*/
 } // namespace ORB_SLAM2
